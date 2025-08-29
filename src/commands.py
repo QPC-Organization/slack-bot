@@ -62,7 +62,7 @@ def _handle_help_command(bot, user_id, channel_id):
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "• `/checkin` — Start your daily standup\n• `/health` — Send a health check prompt\n• `/kr (sprint) (kr_name)` — Search for a Key Result in a specific sprint\n• `/blocked` — Report a new blocker\n• `/blocker` — View your current blockers"
+                "text": "• `/checkin` — Start your daily standup\n• `/health` — Send a health check prompt\n• `/kr (sprint) (kr_name)` — Search for a Key Result in a specific sprint\n• `/kr mine (sprint_number)` — Show your own KRs in a specific sprint\n• `/blocked` — Report a new blocker\n• `/blocker` — View your current blockers"
             }
         },
         {
@@ -138,34 +138,105 @@ def _handle_kr_command(bot, user_id, text, channel_id):
                     parts = text.split() if text else []
                     sprint_number = None
                     search_term = None
+                    is_mine_command = False
                     
                     if parts:
-                        # First part should be sprint number
-                        try:
-                            sprint_number = int(parts[0])
-                            # Everything after sprint number is the KR search term
+                        # Check if this is a 'mine' command
+                        if parts[0].lower() == 'mine':
+                            is_mine_command = True
                             if len(parts) > 1:
-                                search_term = ' '.join(parts[1:])
-                        except ValueError:
-                            # If first part isn't a number, show error
-                            bot.send_dm(user_id, f"❌ *Invalid Format*\n\nPlease use the format: `/kr (sprint_number) (kr_name)`\n\n*Examples:*\n• `/kr 5` - Search for KRs in Sprint 5\n• `/kr 5 user engagement` - Search for 'user engagement' in Sprint 5\n• `/kr 3 performance` - Search for 'performance' in Sprint 3")
-                            return
+                                # Try to parse sprint number after 'mine'
+                                try:
+                                    sprint_number = int(parts[1])
+                                except ValueError:
+                                    bot.send_dm(user_id, f"❌ *Invalid Format*\n\nPlease use the format: `/kr mine (sprint_number)`\n\n*Examples:*\n• `/kr mine 5` - Show your KRs in Sprint 5\n• `/kr mine 3` - Show your KRs in Sprint 3")
+                                    return
+                            else:
+                                bot.send_dm(user_id, f"❌ *Sprint Number Required*\n\nPlease use the format: `/kr mine (sprint_number)`\n\n*Examples:*\n• `/kr mine 5` - Show your KRs in Sprint 5\n• `/kr mine 3` - Show your KRs in Sprint 3")
+                                return
+
+                        else:
+                            # Regular KR search - First part should be sprint number
+                            try:
+                                sprint_number = int(parts[0])
+                                # Everything after sprint number is the KR search term
+                                if len(parts) > 1:
+                                    search_term = ' '.join(parts[1:])
+                            except ValueError:
+                                # If first part isn't a number, show error
+                                bot.send_dm(user_id, f"❌ *Invalid Format*\n\nPlease use the format: `/kr (sprint_number) (kr_name)` or `/kr mine (sprint_number)`\n\n*Examples:*\n• `/kr 5` - Search for KRs in Sprint 5\n• `/kr 5 user engagement` - Search for 'user engagement' in Sprint 5\n• `/kr mine 5` - Show your KRs in Sprint 5")
+                                return
                     
                     # If no sprint number provided, ask for it
                     if not sprint_number:
-                        bot.send_dm(user_id, f"❌ *Sprint Number Required*\n\nPlease use the format: `/kr (sprint_number) (kr_name)`\n\n*Examples:*\n• `/kr 5` - Search for KRs in Sprint 5\n• `/kr 5 user engagement` - Search for 'user engagement' in Sprint 5")
+                        bot.send_dm(user_id, f"❌ *Sprint Number Required*\n\nPlease use the format: `/kr (sprint_number) (kr_name)` or `/kr mine (sprint_number)`\n\n*Examples:*\n• `/kr 5` - Search for KRs in Sprint 5\n• `/kr 5 user engagement` - Search for 'user engagement' in Sprint 5\n• `/kr mine 5` - Show your KRs in Sprint 5")
                         return
                     
-                    # Always trigger mentor check, pass search_term and sprint_number if present
-                    bot.send_mentor_check(
-                        user_id=user_id,
-                        standup_ts=None,  # No thread for slash commands
-                        user_name=user_name,
-                        request_type="kr",
-                        channel=user_id,
-                        search_term=search_term,
-                        sprint_number=sprint_number
-                    )
+                    if is_mine_command:
+                        # Handle KR mine command - directly get user's KRs
+                        print(f"🔍 DEBUG: Processing KR mine command for user {user_name}, sprint: {sprint_number}")
+                        print(f"🔍 DEBUG: User ID: {user_id}, Username: {user_name}")
+                        
+                        # Send initial message
+                        bot.send_dm(user_id, f"🔍 Searching for your KRs in Sprint {sprint_number}...")
+                        
+                        # Get user's KRs from Coda
+                        if bot.coda:
+                            print(f"🔍 DEBUG: Coda service is available")
+                            try:
+                                print(f"🔍 DEBUG: Calling bot.coda.get_user_krs({user_id}, {user_name}, {sprint_number})")
+                                user_krs = bot.coda.get_user_krs(user_id, user_name, sprint_number)
+                                print(f"🔍 DEBUG: get_user_krs returned: {len(user_krs) if user_krs else 0} KRs")
+                                
+                                if not user_krs:
+                                    bot.send_dm(user_id, f"❌ No KRs found assigned to you in Sprint {sprint_number}.")
+                                    return
+                                
+                                # Format and send results
+                                result_text = f"✅ *Found {len(user_krs)} KRs assigned to you in Sprint {sprint_number}:*\n\n"
+                                
+                                for i, kr in enumerate(user_krs, 1):
+                                    kr_name = kr.get('kr_name', 'N/A')
+                                    owner = kr.get('owner', 'N/A')
+                                    assignee = kr.get('assignee', 'N/A')
+                                    status = kr.get('status', 'N/A')
+                                    sprint = kr.get('sprint', 'N/A')
+                                    definition_of_done = kr.get('definition_of_done', 'N/A')
+                                    
+                                    result_text += f"*KR {i}:* {kr_name}\n"
+                                    if owner != 'N/A':
+                                        result_text += f"  • Owner: {owner}\n"
+                                    if assignee != 'N/A':
+                                        result_text += f"  • Assignee: {assignee}\n"
+                                    if status != 'N/A':
+                                        result_text += f"  • Status: {status}\n"
+                                    if sprint != 'N/A':
+                                        result_text += f"  • Sprint: {sprint}\n"
+                                    if definition_of_done != 'N/A':
+                                        # Truncate long definitions
+                                        dod_text = definition_of_done[:100] + "..." if len(str(definition_of_done)) > 100 else definition_of_done
+                                        result_text += f"  • Definition of Done: {dod_text}\n"
+                                    result_text += "\n"
+                                
+                                # Send the results
+                                bot.send_dm(user_id, result_text)
+                                
+                            except Exception as e:
+                                print(f"❌ Error getting user KRs: {e}")
+                                bot.send_dm(user_id, f"❌ Error retrieving your KRs. Please try again or contact your team lead.")
+                        else:
+                            bot.send_dm(user_id, f"✅ KR mine request submitted!\n\n*User:* {user_name}\n*Sprint:* {sprint_number}")
+                    else:
+                        # Regular KR search - trigger mentor check
+                        bot.send_mentor_check(
+                            user_id=user_id,
+                            standup_ts=None,  # No thread for slash commands
+                            user_name=user_name,
+                            request_type="kr",
+                            channel=user_id,
+                            search_term=search_term,
+                            sprint_number=sprint_number
+                        )
             except Exception as e:
                 print(f"❌ Error in background KR processing: {e}")
         thread = threading.Thread(target=process_kr_command)

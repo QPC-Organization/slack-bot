@@ -578,12 +578,16 @@ class CodaService:
             else:
                 print(f"🔍 DEBUG: KR table {env_var} not found in environment variables")
         
-        # Search priority tables first, then fallback tables
-        prioritized_table_ids = priority_table_ids + fallback_table_ids
-        print(f"🔍 DEBUG: Search order - Priority tables first: {[name for name, _ in priority_table_ids]}")
-        
-        doc_id = self.doc_id
-        all_matches = []
+                    # Search priority tables first, then fallback tables ONLY if needed
+            print(f"🔍 DEBUG: Search order - Priority tables first: {[name for name, _ in priority_table_ids]}")
+            print(f"🔍 DEBUG: Fallback tables available: {[name for name, _ in fallback_table_ids]}")
+            print(f"🔍 DEBUG: Total tables configured: {len(priority_table_ids) + len(fallback_table_ids)}")
+            print(f"🔍 DEBUG: Priority table IDs: {[(name, table_id[:8] + '...') for name, table_id in priority_table_ids]}")
+            print(f"🔍 DEBUG: Fallback table IDs: {[(name, table_id[:8] + '...') for name, table_id in fallback_table_ids]}")
+            
+            doc_id = self.doc_id
+            all_matches = []
+            priority_matches_found = False
 
         # Helper to search a table for KR name
         def search_table(table_id):
@@ -677,20 +681,65 @@ class CodaService:
             
             return matches
 
-        # Search tables in priority order (6 recommended tables first)
-        for table_name, table_id in prioritized_table_ids:
-            print(f"🔍 DEBUG: Searching table {table_name} ({table_id})")
+        # Search priority tables first
+        print(f"🔍 DEBUG: Starting search in priority tables...")
+        priority_tables_searched = []
+        priority_tables_with_results = []
+        
+        for table_name, table_id in priority_table_ids:
+            print(f"🔍 DEBUG: Searching priority table {table_name} ({table_id})")
+            priority_tables_searched.append(table_name)
             table_matches = search_table(table_id)
             all_matches.extend(table_matches)
             
-            # If we found matches in priority tables, we can stop early
-            if table_name in [name for name, _ in priority_table_ids] and table_matches:
-                print(f"🔍 DEBUG: Found {len(table_matches)} matches in priority table {table_name}, continuing search for more results")
+            if table_matches:
+                priority_matches_found = True
+                priority_tables_with_results.append(table_name)
+                print(f"🔍 DEBUG: ✅ Found {len(table_matches)} matches in priority table {table_name}")
+            else:
+                print(f"🔍 DEBUG: ❌ No matches found in priority table {table_name}")
             
             # Limit results to prevent overwhelming output
             if len(all_matches) >= 10:
                 print(f"🔍 DEBUG: Reached result limit of 10, stopping search")
                 break
+        
+        # Only search fallback tables if we didn't find enough results in priority tables
+        if not priority_matches_found or len(all_matches) < 5:
+            print(f"🔍 DEBUG: Priority tables didn't yield enough results, searching fallback tables...")
+            fallback_tables_searched = []
+            fallback_tables_with_results = []
+            
+            for table_name, table_id in fallback_table_ids:
+                print(f"🔍 DEBUG: Searching fallback table {table_name} ({table_id})")
+                fallback_tables_searched.append(table_name)
+                table_matches = search_table(table_id)
+                all_matches.extend(table_matches)
+                
+                if table_matches:
+                    fallback_tables_with_results.append(table_name)
+                    print(f"🔍 DEBUG: ✅ Found {len(table_matches)} matches in fallback table {table_name}")
+                else:
+                    print(f"🔍 DEBUG: ❌ No matches found in fallback table {table_name}")
+                
+                # Limit results to prevent overwhelming output
+                if len(all_matches) >= 10:
+                    print(f"🔍 DEBUG: Reached result limit of 10, stopping search")
+                    break
+        else:
+            print(f"🔍 DEBUG: Priority tables yielded sufficient results, skipping fallback tables")
+            fallback_tables_searched = []
+            fallback_tables_with_results = []
+        
+        # Summary of table search results
+        print(f"🔍 DEBUG: === TABLE SEARCH SUMMARY ===")
+        print(f"🔍 DEBUG: Priority tables searched: {priority_tables_searched}")
+        print(f"🔍 DEBUG: Priority tables with results: {priority_tables_with_results}")
+        print(f"🔍 DEBUG: Fallback tables searched: {fallback_tables_searched}")
+        print(f"🔍 DEBUG: Fallback tables with results: {fallback_tables_with_results}")
+        print(f"🔍 DEBUG: Total tables searched: {len(priority_tables_searched) + len(fallback_tables_searched)}")
+        print(f"🔍 DEBUG: Total tables with results: {len(priority_tables_with_results) + len(fallback_tables_with_results)}")
+        print(f"🔍 DEBUG: =================================")
 
         print(f"🔍 DEBUG: search_kr_table found {len(all_matches)} total matches for '{kr_search_term}' in sprint {final_sprint}")
         
@@ -731,7 +780,292 @@ class CodaService:
         
         return all_matches
 
+    def get_user_krs(self, user_id, username=None, sprint_number=None):
+        """Get KRs assigned to a specific user, optionally filtered by sprint number."""
+        try:
+            print(f"🔍 DEBUG: get_user_krs called for user {user_id} (username: {username}), sprint: {sprint_number}")
+            
+            # Table IDs for all 16 KR tables - prioritize the 6 recommended tables first
+            priority_table_ids = []
+            fallback_table_ids = []
+            
+            # First, add the 6 recommended priority tables (highest priority)
+            priority_tables = [
+                "KR_Table",      # Main KR table
+                "KR_Table14",    # Contains unique KRs
+                "KR_Table12",    # Contains unique KRs  
+                "KR_Table13",    # Contains unique KRs
+                "KR_Table10",    # Contains unique KRs
+                "KR_Table11"     # Contains unique KRs
+            ]
+            
+            # Add all other tables as fallback
+            all_tables = []
+            missing_tables = []
+            for i in range(1, 17):  # 1 to 16
+                if i == 1:
+                    env_var = "KR_Table"  # First table is just "KR_Table"
+                else:
+                    env_var = f"KR_Table{i}"  # Tables 2-16 are "KR_Table2", "KR_Table3", etc.
+                
+                table_id = os.environ.get(env_var)
+                if table_id:
+                    if env_var in priority_tables:
+                        priority_table_ids.append((env_var, table_id))
+                        print(f"🔍 DEBUG: ✅ Added priority table {env_var}: {table_id[:8]}...")
+                    else:
+                        fallback_table_ids.append((env_var, table_id))
+                        print(f"🔍 DEBUG: ✅ Added fallback table {env_var}: {table_id[:8]}...")
+                else:
+                    missing_tables.append(env_var)
+                    print(f"🔍 DEBUG: ❌ KR table {env_var} not found in environment variables")
+            
+            # Summary of table configuration
+            print(f"🔍 DEBUG: === TABLE CONFIGURATION SUMMARY ===")
+            print(f"🔍 DEBUG: Priority tables configured: {len(priority_table_ids)}")
+            print(f"🔍 DEBUG: Fallback tables configured: {len(fallback_table_ids)}")
+            print(f"🔍 DEBUG: Missing tables: {missing_tables}")
+            print(f"🔍 DEBUG: Total tables configured: {len(priority_table_ids) + len(fallback_table_ids)}")
+            print(f"🔍 DEBUG: Expected total: 16")
+            print(f"🔍 DEBUG: ======================================")
+            
+            # Search priority tables first, then fallback tables ONLY if needed
+            print(f"🔍 DEBUG: Search order - Priority tables first: {[name for name, _ in priority_table_ids]}")
+            print(f"🔍 DEBUG: Fallback tables available: {[name for name, _ in fallback_table_ids]}")
+            print(f"🔍 DEBUG: Total tables configured: {len(priority_table_ids) + len(fallback_table_ids)}")
+            print(f"🔍 DEBUG: Priority table IDs: {[(name, table_id[:8] + '...') for name, table_id in priority_table_ids]}")
+            print(f"🔍 DEBUG: Fallback table IDs: {[(name, table_id[:8] + '...') for name, table_id in fallback_table_ids]}")
+            
+            doc_id = self.doc_id
+            all_user_krs = []
 
+            # Helper to search a table for KRs assigned to the user
+            def search_table_for_user(table_id):
+                if not table_id:
+                    return []
+                
+                # First, get the table schema to find the relevant columns
+                schema_endpoint = f"/docs/{doc_id}/tables/{table_id}"
+                schema_result = self._make_request("GET", schema_endpoint)
+                if not schema_result:
+                    print(f"❌ Could not get schema for table {table_id}")
+                    return []
+                
+                # Get the columns from the table
+                columns_endpoint = f"/docs/{doc_id}/tables/{table_id}/columns"
+                columns_result = self._make_request("GET", columns_endpoint)
+                if not columns_result:
+                    print(f"❌ Could not get columns for table {table_id}")
+                    return []
+                
+                # Find the relevant columns
+                kr_name_column = None
+                owner_column = None
+                assignee_column = None
+                sprint_column = None
+                status_column = None
+                definition_of_done_column = None
+                columns = columns_result.get("items", [])
+                
+                # Look for common column patterns
+                print(f"🔍 DEBUG: Available columns in table {table_id}: {[col.get('name', 'Unknown') for col in columns]}")
+                for col in columns:
+                    col_name = col.get("name", "").lower()
+                    print(f"🔍 DEBUG: Checking column '{col.get('name')}' (lowercase: '{col_name}')")
+                    if any(keyword in col_name for keyword in ["key result", "kr", "name", "title", "description"]):
+                        kr_name_column = col.get("id")
+                        print(f"🔍 DEBUG: Found KR name column '{col.get('name')}' with ID '{kr_name_column}' in table {table_id}")
+                    elif any(keyword in col_name for keyword in ["owner", "assignee", "responsible", "lead", "assigned", "person"]):
+                        if "owner" in col_name:
+                            owner_column = col.get("id")
+                            print(f"🔍 DEBUG: Found OWNER column '{col.get('name')}' with ID '{col.get('id')}' in table {table_id}")
+                        else:
+                            assignee_column = col.get("id")
+                            print(f"🔍 DEBUG: Found ASSIGNEE column '{col.get('name')}' with ID '{col.get('id')}' in table {table_id}")
+                    elif any(keyword in col_name for keyword in ["sprint", "iteration", "cycle"]):
+                        sprint_column = col.get("id")
+                        print(f"🔍 DEBUG: Found sprint column '{col.get('name')}' with ID '{sprint_column}' in table {table_id}")
+                    elif any(keyword in col_name for keyword in ["status", "state", "progress"]):
+                        status_column = col.get("id")
+                        print(f"🔍 DEBUG: Found status column '{col.get('name')}' with ID '{status_column}' in table {table_id}")
+                    elif any(keyword in col_name for keyword in ["definition", "done", "criteria"]):
+                        definition_of_done_column = col.get("id")
+                        print(f"🔍 DEBUG: Found definition of done column '{col.get('name')}' with ID '{definition_of_done_column}' in table {table_id}")
+                
+                # If no specific column found, use the display column (usually the main name column)
+                if not kr_name_column:
+                    display_column = schema_result.get("displayColumn", {})
+                    if display_column:
+                        kr_name_column = display_column.get("id")
+                        print(f"🔍 DEBUG: Using display column '{display_column.get('name', 'Unknown')}' with ID '{kr_name_column}' in table {table_id}")
+                
+                # If still no column found, use the first column
+                if not kr_name_column and columns:
+                    kr_name_column = columns[0].get("id")
+                    print(f"🔍 DEBUG: Using first column '{columns[0].get('name')}' with ID '{kr_name_column}' in table {table_id}")
+                
+                if not kr_name_column:
+                    print(f"❌ Could not find KR name column in table {table_id}")
+                    return []
+                
+                # Debug: Show what columns we found
+                print(f"🔍 DEBUG: Column detection results for table {table_id}:")
+                print(f"  • KR Name: {kr_name_column} (found: {kr_name_column is not None})")
+                print(f"  • Owner: {owner_column} (found: {owner_column is not None})")
+                print(f"  • Assignee: {assignee_column} (found: {assignee_column is not None})")
+                print(f"  • Sprint: {sprint_column} (found: {sprint_column is not None})")
+                print(f"  • Status: {status_column} (found: {status_column is not None})")
+                print(f"  • Definition of Done: {definition_of_done_column} (found: {definition_of_done_column is not None})")
+                
+                # Now search the table for KRs assigned to the user
+                endpoint = f"/docs/{doc_id}/tables/{table_id}/rows"
+                result = self._make_request("GET", endpoint)
+                if not result:
+                    return []
+                
+                user_krs = []
+                for row in result.get("items", []):
+                    cells = row.get("values", {})
+                    kr_name = cells.get(kr_name_column, "")
+                    
+                    # COMPLETELY REWRITTEN LOGIC: Check BOTH owner AND sprint BEFORE adding KR
+                    should_include_kr = False  # RESET for each KR!
+                    
+                    # Step 1: Check if owner matches
+                    owner_matches = False
+                    if owner_column and cells.get(owner_column, ""):
+                        owner_value = str(cells.get(owner_column, "")).lower()
+                        if username and username.lower() == owner_value:
+                            owner_matches = True
+                            print(f"🔍 DEBUG: Owner EXACT match found: '{username}' == '{owner_value}'")
+                    
+                    if assignee_column and cells.get(assignee_column, ""):
+                        assignee_value = str(cells.get(assignee_column, "")).lower()
+                        if username and username.lower() == assignee_value:
+                            owner_matches = True
+                            print(f"🔍 DEBUG: Assignee EXACT match found: '{username}' == '{assignee_value}'")
+                    
+                    # If no owner/assignee columns found, skip this KR entirely
+                    if not owner_column and not assignee_column:
+                        print(f"🔍 DEBUG: No owner/assignee columns found, skipping KR")
+                        continue
+                    
+                    # Step 2: If owner matches, check sprint
+                    if owner_matches and kr_name:
+                        if sprint_number and sprint_column:
+                            row_sprint = cells.get(sprint_column, "")
+                            if row_sprint:
+                                row_sprint_str = str(row_sprint).strip()
+                                sprint_number_str = str(sprint_number).strip()
+                                
+                                # Check if sprint matches exactly
+                                sprint_matches = (sprint_number_str == row_sprint_str)
+                                print(f"🔍 DEBUG: Sprint comparison: '{row_sprint_str}' == '{sprint_number_str}' = {sprint_matches}")
+                                
+                                if sprint_matches:
+                                    should_include_kr = True
+                                    print(f"🔍 DEBUG: Sprint EXACT match found: '{row_sprint_str}' == '{sprint_number_str}'")
+                                else:
+                                    print(f"🔍 DEBUG: Sprint NO match - excluding KR: '{row_sprint_str}' vs '{sprint_number_str}'")
+                                    should_include_kr = False  # EXPLICITLY set to False
+                            else:
+                                print(f"🔍 DEBUG: Sprint field is empty, excluding KR")
+                                should_include_kr = False  # EXPLICITLY set to False
+                        else:
+                            # Sprint filtering is required but missing - exclude KR
+                            print(f"🔍 DEBUG: Sprint filtering required but missing columns, excluding KR")
+                            should_include_kr = False
+                    
+                    # Step 3: Only add KR if ALL criteria are met
+                    if should_include_kr:
+                        kr_data = {
+                            "id": row.get("id"),
+                            "table_id": table_id,
+                            "kr_name": kr_name,
+                            "owner": cells.get(owner_column, "N/A") if owner_column else "N/A",
+                            "assignee": cells.get(assignee_column, "N/A") if assignee_column else "N/A",
+                            "sprint": cells.get(sprint_column, "N/A") if sprint_column else "N/A",
+                            "status": cells.get(status_column, "N/A") if status_column else "N/A",
+                            "definition_of_done": cells.get(definition_of_done_column, "N/A") if definition_of_done_column else "N/A",
+                            **cells
+                        }
+                        user_krs.append(kr_data)
+                        print(f"🔍 DEBUG: INCLUDED KR in table {table_id}: '{kr_name}' (Owner: {cells.get(owner_column, 'N/A')}, Sprint: {cells.get(sprint_column, 'N/A')})")
+                    else:
+                        print(f"🔍 DEBUG: EXCLUDED KR: '{kr_name}' (Owner match: {owner_matches}, Sprint filtering: {sprint_number and sprint_column})")
+                
+                return user_krs
+
+            # Search priority tables first
+            print(f"🔍 DEBUG: Starting search in priority tables for user KRs...")
+            priority_matches_found = False
+            priority_tables_searched = []
+            priority_tables_with_results = []
+            
+            for table_name, table_id in priority_table_ids:
+                print(f"🔍 DEBUG: Searching priority table {table_name} ({table_id}) for user KRs")
+                priority_tables_searched.append(table_name)
+                table_user_krs = search_table_for_user(table_id)
+                all_user_krs.extend(table_user_krs)
+                
+                if table_user_krs:
+                    priority_matches_found = True
+                    priority_tables_with_results.append(table_name)
+                    print(f"🔍 DEBUG: ✅ Found {len(table_user_krs)} user KRs in priority table {table_name}")
+                else:
+                    print(f"🔍 DEBUG: ❌ No user KRs found in priority table {table_name}")
+            
+            # Only search fallback tables if we didn't find enough results in priority tables
+            if not priority_matches_found or len(all_user_krs) < 3:
+                print(f"🔍 DEBUG: Priority tables didn't yield enough user KRs, searching fallback tables...")
+                fallback_tables_searched = []
+                fallback_tables_with_results = []
+                
+                for table_name, table_id in fallback_table_ids:
+                    print(f"🔍 DEBUG: Searching fallback table {table_name} ({table_id}) for user KRs")
+                    fallback_tables_searched.append(table_name)
+                    table_user_krs = search_table_for_user(table_id)
+                    all_user_krs.extend(table_user_krs)
+                    
+                    if table_user_krs:
+                        fallback_tables_with_results.append(table_name)
+                        print(f"🔍 DEBUG: ✅ Found {len(table_user_krs)} user KRs in fallback table {table_name}")
+                    else:
+                        print(f"🔍 DEBUG: ❌ No user KRs found in fallback table {table_name}")
+            else:
+                print(f"🔍 DEBUG: Priority tables yielded sufficient user KRs, skipping fallback tables")
+                fallback_tables_searched = []
+                fallback_tables_with_results = []
+            
+            # Summary of table search results for user KRs
+            print(f"🔍 DEBUG: === USER KR TABLE SEARCH SUMMARY ===")
+            print(f"🔍 DEBUG: Priority tables searched: {priority_tables_searched}")
+            print(f"🔍 DEBUG: Priority tables with user KRs: {priority_tables_with_results}")
+            print(f"🔍 DEBUG: Fallback tables searched: {fallback_tables_searched}")
+            print(f"🔍 DEBUG: Fallback tables with user KRs: {fallback_tables_with_results}")
+            print(f"🔍 DEBUG: Total tables searched: {len(priority_tables_searched) + len(fallback_tables_searched)}")
+            print(f"🔍 DEBUG: Total tables with user KRs: {len(priority_tables_with_results) + len(fallback_tables_with_results)}")
+            print(f"🔍 DEBUG: ================================================")
+
+            print(f"🔍 DEBUG: get_user_krs found {len(all_user_krs)} total KRs for user {user_id} in sprint {sprint_number}")
+            
+            # Remove duplicates based on KR name
+            unique_krs = {}
+            for kr in all_user_krs:
+                kr_name = kr.get('kr_name', '')
+                if kr_name and kr_name not in unique_krs:
+                    unique_krs[kr_name] = kr
+            
+            unique_user_krs = list(unique_krs.values())
+            print(f"🔍 DEBUG: After deduplication: {len(unique_user_krs)} unique KRs")
+            
+            return unique_user_krs
+            
+        except Exception as e:
+            print(f"❌ Error in get_user_krs: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
 
     def add_health_check_explanation(self, user_id, username, health_check_response, explanation):
         """Add health check explanation to After_Health_Check table."""

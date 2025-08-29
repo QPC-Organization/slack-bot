@@ -1,6 +1,15 @@
 # Slack Bot with Coda Integration
 
-A Slack bot that sends daily mood check prompts and stores responses in a Coda table.
+A sophisticated Slack bot for team management and productivity tracking. The bot handles daily standups, health checks, blocker management, and integrates with Coda for data storage and analysis.
+
+## 📚 Documentation
+
+This project includes comprehensive documentation to help you get started quickly:
+
+- **[🚀 Quick Start Guide](QUICK_START.md)** - Get the bot running in 10 minutes
+- **[📖 Project Documentation](PROJECT_DOCUMENTATION.md)** - Complete project overview and setup
+- **[🛠️ Development Guide](DEVELOPMENT_GUIDE.md)** - For developers extending the bot
+- **[🚨 Troubleshooting Guide](TROUBLESHOOTING.md)** - Common issues and solutions
 
 ## Features
 
@@ -84,6 +93,7 @@ Users can interact with the bot using slash commands (`/`) or exclamation comman
 - `/blocked` or `!blocked` - Report a blocker (mentor check first)
 - `/kr [search]` or `!kr [search]` - Search for Key Results
 - `/kr` or `!kr` - Get KR help (mentor check first)
+
 - `/health` or `!health` - Start a health check
 - `/help` or `!help` - Show help message with available commands
 
