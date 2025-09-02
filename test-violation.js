@@ -1,1 +1,1 @@
-const my_variable=  "hello world" ;
+const my_variable = "hello world";
