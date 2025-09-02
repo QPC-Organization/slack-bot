@@ -1,12 +1,12 @@
 name: CI
 
 on:
-  pull_request:
-    branches:
-      - master
   push:
-    branches:
-      - master
+    branches: ['**']          # run on any branch
+  pull_request:
+    branches: ['**']          # run on any PR
+  workflow_dispatch:          # allow manual runs in the UI
+
 
 jobs:
   # Node.js Jobs
