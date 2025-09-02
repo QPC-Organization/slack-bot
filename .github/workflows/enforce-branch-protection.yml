@@ -1,0 +1,77 @@
+name: Enforce Branch Protection
+
+on:
+  workflow_dispatch:
+
+jobs:
+  enforce_protection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Read stack.json
+        id: stack
+        run: |
+          DEFAULT_BRANCH=$(jq -r '.defaultBranch' .ci/stack.json)
+          echo "default_branch=$DEFAULT_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Enforce branch protection
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.REPO_ADMIN_TOKEN }}
+          script: |
+            const { default_branch } = process.env;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const checks = [
+              'lint-node',
+              'format-check-node',
+              'typecheck-node',
+              'unit-tests-node',
+              'build-node',
+              'coverage-threshold-node',
+              'dep-audit-node',
+              'security-sast-node',
+              'lint-python',
+              'format-check-python',
+              'typecheck-python',
+              'unit-tests-python',
+              'build-python',
+              'coverage-threshold-python',
+              'dep-audit-python',
+              'security-sast-python',
+              'pr-title-lint',
+              'commit-message-lint',
+              'secrets-scan',
+              'e2e-smoke'
+            ];
+
+            try {
+              await github.request('PUT /repos/{owner}/{repo}/branches/{branch}/protection', {
+                owner,
+                repo,
+                branch: default_branch,
+                enforce_admins: true,
+                required_pull_request_reviews: {
+                  dismiss_stale_reviews_on_new_commits: true,
+                  require_code_owner_reviews: false,
+                  required_approving_review_count: 1,
+                },
+                required_status_checks: {
+                  strict: true,
+                  contexts: checks,
+                },
+                restrictions: null,
+                headers: {
+                  'X-GitHub-Api-Version': '2022-11-28'
+                }
+              });
+              console.log(`Branch protection enforced on ${default_branch} with ${checks.length} required checks.`);
+            } catch (error) {
+              console.error(`Error enforcing branch protection: ${error.message}`);
+              core.setFailed(`Failed to enforce branch protection: ${error.message}`);
+            }
+        env:
+          default_branch: ${{ steps.stack.outputs.default_branch }}
