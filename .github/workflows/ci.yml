@@ -7,7 +7,6 @@ on:
     branches: ['**']          # run on any PR
   workflow_dispatch:          # allow manual runs in the UI
 
-
 jobs:
   # Node.js Jobs
   lint-node:
@@ -70,7 +69,6 @@ jobs:
       - name: Run unit tests
         run: npx vitest run || npx jest --ci || (echo "No Vitest or Jest found. Running a dummy test." && echo "console.log('Dummy test passed');" > dummy.test.js && node dummy.test.js)
 
-
   build-node:
     runs-on: ubuntu-latest
     steps:
@@ -102,9 +100,7 @@ jobs:
         run: npx vitest run --coverage || npx jest --coverage || echo "No test runner found. Running dummy test with 100% coverage."
       - name: Check coverage threshold
         run: |
-          # This is a placeholder. Replace with actual coverage reporting and threshold check.
-          # For example, if using c8 (vitest default), you might check the summary.
-          # For now, we'll assume a dummy 100% if no tests are found.
+          # Placeholder coverage gate using c8/jest summary if present
           if [ -f "coverage/coverage-summary.json" ]; then
             COVERAGE=$(jq -r '.total.statements.pct' coverage/coverage-summary.json)
             if (( $(echo "$COVERAGE < 80" | bc -l) )); then
@@ -117,7 +113,7 @@ jobs:
             echo "No coverage report found. Assuming 100% for dummy success."
             exit 0
           fi
-          
+
   dep-audit-node:
     runs-on: ubuntu-latest
     steps:
@@ -142,7 +138,7 @@ jobs:
         uses: returntocorp/semgrep-action@v1
         with:
           autofix: false
-          
+
   # Python Jobs
   lint-python:
     runs-on: ubuntu-latest
@@ -156,7 +152,7 @@ jobs:
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - name: Install dependencies
-        run: uv pip install -r requirements.txt
+        run: uv pip install --system -r requirements.txt
       - name: Run Ruff lint
         run: uv run ruff check .
 
@@ -172,7 +168,7 @@ jobs:
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - name: Install dependencies
-        run: uv pip install -r requirements.txt
+        run: uv pip install --system -r requirements.txt
       - name: Run Ruff format check
         run: uv run ruff format --check .
 
@@ -188,9 +184,9 @@ jobs:
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - name: Install dependencies
-        run: uv pip install -r requirements.txt
+        run: uv pip install --system -r requirements.txt
       - name: Install Mypy
-        run: uv pip install mypy
+        run: uv pip install --system mypy
       - name: Run Mypy check
         run: uv run mypy .
 
@@ -206,9 +202,9 @@ jobs:
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - name: Install dependencies
-        run: uv pip install -r requirements.txt
+        run: uv pip install --system -r requirements.txt
       - name: Install Pytest and Coverage
-        run: uv pip install pytest pytest-cov
+        run: uv pip install --system pytest pytest-cov
       - name: Run unit tests with coverage
         run: uv run pytest -q --cov=src
 
@@ -226,7 +222,7 @@ jobs:
       - name: Run build (placeholder)
         run: |
           echo "No explicit build step for Python project detected. Running placeholder build."
-          uv pip install build || true # Install build tool if needed for future
+          uv pip install --system build || true
           python -m build --sdist --wheel . || echo "Build failed (expected if no setup.py), continuing as placeholder"
 
   coverage-threshold-python:
@@ -241,9 +237,9 @@ jobs:
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - name: Install dependencies
-        run: uv pip install -r requirements.txt
+        run: uv pip install --system -r requirements.txt
       - name: Install Pytest and Coverage
-        run: uv pip install pytest pytest-cov
+        run: uv pip install --system pytest pytest-cov
       - name: Run unit tests with coverage
         run: uv run pytest -q --cov=src --cov-report=json:coverage.json
       - name: Check coverage threshold
@@ -268,9 +264,9 @@ jobs:
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - name: Install dependencies
-        run: uv pip install -r requirements.txt
+        run: uv pip install --system -r requirements.txt
       - name: Install pip-audit
-        run: uv pip install pip-audit
+        run: uv pip install --system pip-audit
       - name: Run dependency audit
         run: uv run pip-audit
 
@@ -286,9 +282,9 @@ jobs:
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - name: Install dependencies
-        run: uv pip install -r requirements.txt
+        run: uv pip install --system -r requirements.txt
       - name: Install Bandit
-        run: uv pip install bandit
+        run: uv pip install --system bandit
       - name: Run Bandit SAST
         run: uv run bandit -r . -x venv
 
@@ -311,24 +307,19 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install commitlint
         run: npm install -g @commitlint/cli @commitlint/config-conventional
-
       - name: Create commitlint config
         run: |
           printf "module.exports = { extends: ['@commitlint/config-conventional'] };\n" > commitlint.config.cjs
-
       - name: Run commitlint
         uses: wagoid/commitlint-github-action@v6
         with:
           configFile: commitlint.config.cjs
-
 
   secrets-scan:
     runs-on: ubuntu-latest
@@ -339,7 +330,7 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} # Optional: if you have a Gitleaks license
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} # Optional
 
   e2e-smoke:
     runs-on: ubuntu-latest
@@ -360,15 +351,12 @@ jobs:
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - name: Install Python dependencies
-        run: uv pip install -r requirements.txt
+        run: uv pip install --system -r requirements.txt
       - name: Run E2E smoke test
         run: |
-          # Node.js smoke test (e.g., import main module)
           echo "Running Node.js smoke test..."
-          node -e "require('./src/index.js')" || true # Assuming src/index.js is the main entry for Node.js
+          node -e "require('./src/index.js')" || true
           echo "Node.js smoke test passed."
-
-          # Python smoke test (e.g., import main module)
           echo "Running Python smoke test..."
-          python -c "import src.app" || true # Assuming src/app.py is a main entry for Python
+          python -c "import src.app" || true
           echo "Python smoke test passed."
