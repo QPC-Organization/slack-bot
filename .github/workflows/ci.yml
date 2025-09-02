@@ -68,7 +68,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Run unit tests
-        run: npx vitest run || npx jest --ci || echo "No Vitest or Jest found. Running a dummy test." && echo "console.log('Dummy test passed');" > dummy.test.js && node dummy.test.js
+        run: npx vitest run || npx jest --ci || (echo "No Vitest or Jest found. Running a dummy test." && echo "console.log('Dummy test passed');" > dummy.test.js && node dummy.test.js)
+
 
   build-node:
     runs-on: ubuntu-latest
@@ -310,21 +311,24 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
       - name: Install commitlint
         run: npm install -g @commitlint/cli @commitlint/config-conventional
+
       - name: Create commitlint config
         run: |
-          cat <<EOF > commitlint.config.cjs
-          module.exports = { extends: ['@commitlint/config-conventional'] };
-EOF
+          printf "module.exports = { extends: ['@commitlint/config-conventional'] };\n" > commitlint.config.cjs
+
       - name: Run commitlint
         uses: wagoid/commitlint-github-action@v6
         with:
           configFile: commitlint.config.cjs
+
 
   secrets-scan:
     runs-on: ubuntu-latest
