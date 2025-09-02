@@ -318,7 +318,9 @@ jobs:
         run: npm install -g @commitlint/cli @commitlint/config-conventional
       - name: Create commitlint config
         run: |
-          echo "module.exports = { extends: [\'@commitlint/config-conventional\'] };" > commitlint.config.cjs
+          cat <<EOF > commitlint.config.cjs
+          module.exports = { extends: ['@commitlint/config-conventional'] };
+EOF
       - name: Run commitlint
         uses: wagoid/commitlint-github-action@v6
         with:
