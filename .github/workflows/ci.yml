@@ -12,45 +12,45 @@ jobs:
   # Node.js Jobs
   # ---------------------------
   lint-node:
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'npm'
-    - name: Skip if no package.json
-      run: |
-        if [ ! -f package.json ]; then
-          echo "skip=true" >> $GITHUB_ENV
-        fi
-    - name: Install dependencies
-      if: env.skip != 'true'
-      run: npm ci
-    - name: Run lint (Next-aware with fallback)
-      if: env.skip != 'true'
-      shell: bash
-      run: |
-        # read the lint script (if any) safely
-        LINT_SCRIPT=$(node -e "try{console.log(require('./package.json').scripts?.lint||'')}catch{console.log('')}")
-        echo "Detected lint script: '${LINT_SCRIPT}'"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Skip if no package.json
+        run: |
+          if [ ! -f package.json ]; then
+            echo "skip=true" >> $GITHUB_ENV
+          fi
+      - name: Install dependencies
+        if: env.skip != 'true'
+        run: npm ci
+      - name: Run lint (Next-aware with fallback)
+        if: env.skip != 'true'
+        shell: bash
+        run: |
+          # read the lint script (if any) safely
+          LINT_SCRIPT=$(node -e "try{console.log(require('./package.json').scripts?.lint||'')}catch{console.log('')}")
+          echo "Detected lint script: '${LINT_SCRIPT}'"
 
-        # If lint script includes 'next lint' but no Next app dirs, fallback to ESLint
-        if echo "$LINT_SCRIPT" | grep -q "next lint"; then
-          if [ -d app ] || [ -d pages ]; then
-            echo "Running: next lint"
-            npx next lint || true
+          # If lint script includes 'next lint' but no Next app dirs, fallback to ESLint
+          if echo "$LINT_SCRIPT" | grep -q "next lint"; then
+            if [ -d app ] || [ -d pages ]; then
+              echo "Running: next lint"
+              npx next lint || true
+            else
+              echo "No app/ or pages/ found. Falling back to ESLint."
+              npx eslint . || true
+            fi
+          elif [ -n "$LINT_SCRIPT" ]; then
+            echo "Running: npm run lint"
+            npm run lint || true
           else
-            echo "No app/ or pages/ found. Falling back to ESLint."
+            echo "No lint script. Running ESLint directly."
             npx eslint . || true
           fi
-        elif [ -n "$LINT_SCRIPT" ]; then
-          echo "Running: npm run lint"
-          npm run lint || true
-        else
-          echo "No lint script. Running ESLint directly."
-          npx eslint . || true
-        fi
 
 
   format-check-node:
@@ -477,7 +477,7 @@ jobs:
             print('Python OK')
           except Exception:
             print('No Python entry; skip')
-PY
+          PY
 
   deploy:
     runs-on: ubuntu-latest
@@ -485,4 +485,7 @@ PY
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - name: Deploy to Production (Placeholder)
-        run: echo "Deployment placeholder: This step will always succeed for now." # Replace with actual deployment logic
+        run: |
+          echo "Deployment placeholder: This step will always succeed for now." # Replace with actual deployment logic
+  
+
