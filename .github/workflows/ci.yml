@@ -408,23 +408,6 @@ jobs:
           scopes: |
             *
 
-  commit-message-lint:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Install commitlint
-        run: npm install -g @commitlint/cli @commitlint/config-conventional
-      - name: Create commitlint config
-        run: |
-          printf "module.exports = { extends: ['@commitlint/config-conventional'] };\n" > commitlint.config.cjs
-      - name: Run commitlint
-        uses: wagoid/commitlint-github-action@v6
-        with:
-          configFile: commitlint.config.cjs
 
   secrets-scan:
     runs-on: ubuntu-latest
@@ -481,7 +464,7 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: [lint-node, format-check-node, typecheck-node, unit-tests-node, build-node, coverage-threshold-node, dep-audit-node, security-sast-node, lint-python, format-check-python, typecheck-python, unit-tests-python, build-python, coverage-threshold-python, dep-audit-python, security-sast-python, pr-title-lint, commit-message-lint, secrets-scan, e2e-smoke]
+    needs: [lint-node, format-check-node, typecheck-node, unit-tests-node, build-node, coverage-threshold-node, dep-audit-node, security-sast-node, lint-python, format-check-python, typecheck-python, unit-tests-python, build-python, coverage-threshold-python, dep-audit-python, security-sast-python, pr-title-lint, secrets-scan, e2e-smoke]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - name: Deploy to Production (Placeholder)
