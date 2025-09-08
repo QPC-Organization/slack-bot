@@ -341,18 +341,18 @@ jobs:
             PCT=$(python - <<'PY'
             import json; print(json.load(open("coverage.json"))["totals"]["percent_covered_display"])
             PY
-                        )
-                        if (( $(echo "$PCT < 80" | bc -l) )); then
-                          echo "Coverage below 80%: $PCT%"
-                          exit 1
-                        else
-                          echo "Coverage OK: $PCT%"
-                        fi
-                      else
-                        echo "No coverage.json; skipping threshold."
-                      fi
+            )
+            if (( $(echo "$PCT < 80" | bc -l) )); then
+              echo "Coverage below 80%: $PCT%"
+              exit 1
+            else
+              echo "Coverage OK: $PCT%"
+            fi
+          else
+            echo "No coverage.json; skipping threshold."
+          fi
 
-              dep-audit-python:
+  dep-audit-python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -478,3 +478,11 @@ jobs:
           except Exception:
             print('No Python entry; skip')
 PY
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [lint-node, format-check-node, typecheck-node, unit-tests-node, build-node, coverage-threshold-node, dep-audit-node, security-sast-node, lint-python, format-check-python, typecheck-python, unit-tests-python, build-python, coverage-threshold-python, dep-audit-python, security-sast-python, pr-title-lint, commit-message-lint, secrets-scan, e2e-smoke]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Deploy to Production (Placeholder)
+        run: echo "Deployment placeholder: This step will always succeed for now." # Replace with actual deployment logic
