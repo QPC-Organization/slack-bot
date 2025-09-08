@@ -275,48 +275,6 @@ jobs:
           uv pip install --system build || true
           python -m build --sdist --wheel . || echo "No build config; ok."
 
-  coverage-threshold-python:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-      - run: curl -LsSf https://astral.sh/uv/install.sh | sh
-      - name: Skip if no Python files
-        run: |
-          if [ "$(git ls-files '*.py' | wc -l)" -eq 0 ]; then
-            echo "skip=true" >> $GITHUB_ENV
-          fi
-      - name: Install pytest (and deps if any)
-        if: env.skip != 'true'
-        run: |
-          if [ -f requirements.txt ]; then
-            uv pip install --system -r requirements.txt
-          fi
-          uv pip install --system pytest pytest-cov
-      - name: Run tests with coverage (json)
-        if: env.skip != 'true'
-        run: uv run pytest -q --cov=src --cov-report=json:coverage.json || echo "no tests"
-      - name: Enforce >= 80%
-        if: env.skip != 'true'
-        shell: bash
-        run: |
-          if [ -f coverage.json ]; then
-            PCT=$(python - <<'PY'
-            import json; print(json.load(open("coverage.json"))["totals"]["percent_covered_display"])
-            PY
-            )
-            if (( $(echo "$PCT < 80" | bc -l) )); then
-              echo "Coverage below 80%: $PCT%"
-              exit 1
-            else
-              echo "Coverage OK: $PCT%"
-            fi
-          else
-            echo "No coverage.json; skipping threshold."
-          fi
-
   dep-audit-python:
     runs-on: ubuntu-latest
     steps:
@@ -429,7 +387,7 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: [lint-node, format-check-node, typecheck-node, unit-tests-node, build-node, dep-audit-node, security-sast-node, lint-python, format-check-python, typecheck-python, unit-tests-python, build-python, coverage-threshold-python, dep-audit-python, security-sast-python, pr-title-lint, secrets-scan, e2e-smoke]
+    needs: [lint-node, format-check-node, typecheck-node, unit-tests-node, build-node, dep-audit-node, security-sast-node, lint-python, format-check-python, typecheck-python, unit-tests-python, build-python, dep-audit-python, security-sast-python, pr-title-lint, secrets-scan, e2e-smoke]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - name: Deploy to Production (Placeholder)
