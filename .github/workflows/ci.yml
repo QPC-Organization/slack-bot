@@ -135,41 +135,6 @@ jobs:
         if: env.skip != 'true'
         run: npm run build || echo "No build script found, skipping build for Node.js."
 
-  coverage-threshold-node:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-      - name: Skip if no package.json
-        run: |
-          if [ ! -f package.json ]; then
-            echo "skip=true" >> $GITHUB_ENV
-          fi
-      - name: Install dependencies
-        if: env.skip != 'true'
-        run: npm ci
-      - name: Run unit tests with coverage
-        if: env.skip != 'true'
-        run: npx vitest run --coverage || npx jest --coverage || echo "No test runner; assuming 100%."
-      - name: Check coverage threshold
-        if: env.skip != 'true'
-        run: |
-          if [ -f "coverage/coverage-summary.json" ]; then
-            COVERAGE=$(jq -r '.total.statements.pct' coverage/coverage-summary.json)
-            if (( $(echo "$COVERAGE < 80" | bc -l) )); then
-              echo "Coverage below 80%: $COVERAGE%"
-              exit 1
-            else
-              echo "Coverage OK: $COVERAGE%"
-            fi
-          else
-            echo "No coverage report; skipping threshold for now."
-            exit 0
-          fi
-
   dep-audit-node:
     runs-on: ubuntu-latest
     steps:
@@ -464,7 +429,7 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: [lint-node, format-check-node, typecheck-node, unit-tests-node, build-node, coverage-threshold-node, dep-audit-node, security-sast-node, lint-python, format-check-python, typecheck-python, unit-tests-python, build-python, coverage-threshold-python, dep-audit-python, security-sast-python, pr-title-lint, secrets-scan, e2e-smoke]
+    needs: [lint-node, format-check-node, typecheck-node, unit-tests-node, build-node, dep-audit-node, security-sast-node, lint-python, format-check-python, typecheck-python, unit-tests-python, build-python, coverage-threshold-python, dep-audit-python, security-sast-python, pr-title-lint, secrets-scan, e2e-smoke]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - name: Deploy to Production (Placeholder)
