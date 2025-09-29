@@ -1,0 +1,87 @@
+name: Ephemeral Environment
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+jobs:
+  deploy:
+    name: Deploy Preview Environment
+    runs-on: ubuntu-latest
+    if: github.event.action != 'closed'
+    # Define outputs for this job, so other jobs can access them
+    outputs:
+      preview_url: ${{ steps.get_preview_url.outputs.PREVIEW_URL }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Deploy Preview
+        id: deploy_step # Add an ID to this step to reference its output
+        run: |
+          # Run the deployment script. The script is expected to print "Preview URL: <url>"
+          # We capture its full output to parse the URL later.
+          "$(pwd)/scripts/deploy_preview.sh" "${{ github.head_ref }}"
+        env:
+          # This is where you would typically set up environment variables for your deployment,
+          # such as API keys, cloud provider credentials, etc.
+          # Example for a cloud provider:
+          # AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          # AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # KUBECONFIG_BASE64: ${{ secrets.KUBECONFIG_BASE64 }} # For Kubernetes deployments
+          # HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }} # For Heroku deployments
+
+      - name: Get Preview URL from Deploy Output
+        id: get_preview_url # Add an ID to this step to reference its output
+        run: |
+          # Extract the Preview URL from the output of the 'Deploy Preview' step.
+          # The deploy script is expected to output in the format: "Preview URL: <url>"
+          PREVIEW_URL=$(echo "${{ steps.deploy_step.outputs.stdout }}" | grep "Preview URL:" | sed -e 's/^Preview URL: //')
+          echo "Discovered Preview URL: $PREVIEW_URL"
+          # Make the Preview URL available as an output of this step, and thus of the job.
+          echo "PREVIEW_URL=$PREVIEW_URL" >> "$GITHUB_OUTPUT"
+
+  smoke_test:
+    name: Smoke Test Preview Environment
+    runs-on: ubuntu-latest
+    needs: deploy # This job depends on the 'deploy' job to complete successfully
+    if: github.event.action != 'closed'
+    steps:
+      - name: Wait for Deployment to be Ready
+        # In a real-world scenario, you might have a more sophisticated wait strategy,
+        # checking the health endpoint multiple times with retries (e.g., using a 'wait-for-it.sh' script).
+        # For now, a simple sleep will suffice.
+        run: sleep 10 # Give the environment a moment to spin up and become healthy
+
+      - name: Curl Health Check
+        # Use the PREVIEW_URL output from the 'deploy' job
+        run: |
+          # Perform a curl request to the health endpoint of the deployed preview environment.
+          # The --fail (-f) flag makes curl exit with an error code if the HTTP status is 400 or higher.
+          # --show-error (-S) shows an error message if it fails.
+          # --silent (-s) suppresses progress and error messages.
+          echo "Running smoke test on: ${{ needs.deploy.outputs.preview_url }}/health"
+          curl --fail --show-error --silent "${{ needs.deploy.outputs.preview_url }}/health" || { echo "Smoke test failed! Preview environment not healthy."; exit 1; }
+          echo "Smoke test passed: Preview environment is healthy."
+        env:
+          # The PREVIEW_URL is passed implicitly via job outputs, but we can also set it explicitly if needed
+          PREVIEW_URL: ${{ needs.deploy.outputs.preview_url }}
+
+  destroy:
+    name: Destroy Preview Environment
+    runs-on: ubuntu-latest
+    # This job should only run when the pull request is closed or merged
+    if: github.event.action == 'closed'
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Destroy Preview
+        # Run the destruction script with the branch name.
+        run: "$(pwd)/scripts/destroy_preview.sh" "${{ github.head_ref }}"
+        env:
+          # Similar to deploy, this is where you'd pass credentials for tearing down the environment.
+          # AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          # AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # KUBECONFIG_BASE64: ${{ secrets.KUBECONFIG_BASE64 }}
+          # HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
