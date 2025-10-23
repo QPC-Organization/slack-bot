@@ -1243,6 +1243,41 @@ def _handle_completion_reaction(bot, user_id, item):
 
 # Removed Flask webhook routes - using Socket Mode instead
 
+def handle_slash_command(bot, payload):
+    """Handle slash command requests."""
+    try:
+        command = payload.get('command', '')
+        text = payload.get('text', '')
+        user_id = payload.get('user_id', '')
+        channel_id = payload.get('channel_id', '')
+        trigger_id = payload.get('trigger_id', '')  # Extract trigger_id for modal opening
+        
+        print(f"🔍 Slash command received: {command} {text} from {user_id}")
+        print(f"🔍 Trigger ID: {trigger_id}")
+        
+        # Extract the actual command name (remove the leading slash)
+        command_name = command.lstrip('/') if command.startswith('/') else command
+        
+        # Import and call the command processor
+        from .commands import _process_command
+        
+        # Process the command (this will handle the logic and send responses)
+        # Pass trigger_id for commands that need to open modals
+        success = _process_command(bot, user_id, command_name, text, channel_id, trigger_id)
+        
+        if success:
+            print(f"✅ Command {command} processed successfully")
+            return {"text": "Command processed"}
+        else:
+            print(f"❌ Command {command} failed to process")
+            return {"text": "Command processing failed"}
+        
+    except Exception as e:
+        print(f"❌ Error handling slash command: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"text": "Error processing command"}
+
 def handle_interactive_components(bot, payload):
     """Handle interactive components with comprehensive error handling."""
     try:
@@ -1280,7 +1315,7 @@ def handle_interactive_components(bot, payload):
             return safe_executor.execute(handle_blocker_note_edit, "handle_interactive_components", user_id, bot=bot, payload=payload)
         elif action_id in ['complete_blocker', 'complete_blocker_with_form']:
             return safe_executor.execute(handle_complete_blocker_with_form, "handle_interactive_components", user_id, bot=bot, payload=payload)
-        elif action_id in ['great', 'okay', 'not_great']:
+        elif action_id in ['great', 'okay', 'not_great', 'health_check_great', 'health_check_okay', 'health_check_not_great']:
             return safe_executor.execute(handle_health_response, "handle_interactive_components", user_id, bot=bot, payload=payload)
         elif action_id in ['escalate_help', 'monitor_issue']:
             return safe_executor.execute(handle_followup_response, "handle_interactive_components", user_id, bot=bot, payload=payload)
@@ -1346,17 +1381,31 @@ def handle_interactive_components(bot, payload):
 def handle_health_response(bot, payload):
     """Handle health check button responses with background processing."""
     try:
-        user_id = payload['user']['id']
-        user_name = bot.get_user_name(user_id)
-        action_id = payload['actions'][0]['action_id']
-        channel_id = payload['channel']['id']
-        message_ts = payload['message']['ts']
+        import requests
         
-        # Map action_id to mood
+        # Extract user and message data safely to avoid KeyError/TypeError
+        user_id = payload.get('user', {}).get('id')
+
+        # Ensure we fetch the user using the correct Slack SDK parameter
+        try:
+            user_info = bot.client.users_info(user=user_id)
+            user_name = user_info['user'].get('real_name') or user_info['user'].get('name', 'Unknown')
+        except Exception:
+            user_name = "Unknown"
+
+        action_id = payload.get('actions', [{}])[0].get('action_id')
+        channel_id = payload.get('channel', {}).get('id')
+        message_ts = (payload.get('message') or {}).get('ts')
+        response_url = payload.get('response_url', '')  # Extract response_url for message updates
+        
+        # Map action_id to mood (support both old and new action IDs)
         mood_map = {
             'great': '😊 Great',
             'okay': '😐 Okay',
-            'not_great': '😕 Not great'
+            'not_great': '😕 Not great',
+            'health_check_great': '😊 Great',
+            'health_check_okay': '😐 Okay',
+            'health_check_not_great': '😕 Not great'
         }
         
         mood = mood_map.get(action_id, 'Unknown')
@@ -1365,9 +1414,6 @@ def handle_health_response(bot, payload):
         if not hasattr(bot, 'health_responses'):
             bot.health_responses = {}
         bot.health_responses[user_id] = mood
-        
-        # Send immediate confirmation
-        bot.send_dm(user_id, f"✅ Health check response received! Processing in background...")
         
         # Process Coda saving in background thread to avoid Slack timeout
         def process_health_check_in_background():
@@ -1379,19 +1425,41 @@ def handle_health_response(bot, payload):
                         success = bot.coda.save_health_check(user_id, user_name, mood, "", False)
                         if success:
                             print(f"✅ Health check response stored in Health_Check table for {user_name}")
-                            bot.send_dm(user_id, "✅ Your health check has been saved to Coda!")
                         else:
                             print(f"❌ Failed to store health check in Health_Check table for {user_name}")
-                            bot.send_dm(user_id, "⚠️ Your health check was processed, but there was an issue saving to Coda.")
                     except Exception as e:
                         print(f"❌ Error storing health check in Health_Check table: {e}")
-                        bot.send_dm(user_id, "⚠️ Your health check was processed, but there was an issue saving to Coda.")
+                
+                # Update the original message with confirmation
+                if response_url:
+                    try:
+                        # Create the confirmation message JSON
+                        confirmation_data = {
+                            "replace_original": True,
+                            "blocks": [
+                                {
+                                    "type": "section",
+                                    "text": {
+                                        "type": "mrkdwn",
+                                        "text": "✅ Thanks for checking in! Your response has been recorded."
+                                    }
+                                }
+                            ]
+                        }
+                        
+                        # Send HTTP POST request to response_url
+                        response = requests.post(response_url, json=confirmation_data, timeout=5)
+                        if response.status_code == 200:
+                            print(f"✅ Successfully updated original message for {user_name}")
+                        else:
+                            print(f"❌ Failed to update original message. Status: {response.status_code}")
+                    except Exception as e:
+                        print(f"❌ Error updating original message: {e}")
                 else:
-                    bot.send_dm(user_id, "✅ Your health check has been processed!")
+                    print("⚠️ No response_url found, cannot update original message")
                 
             except Exception as e:
                 print(f"Error in background health check processing: {e}")
-                bot.send_dm(user_id, "❌ Sorry, there was an error processing your health check. Please try again.")
         
         # Start background thread
         import threading
@@ -1399,55 +1467,56 @@ def handle_health_response(bot, payload):
         background_thread.daemon = True
         background_thread.start()
         
-        # Send follow-up prompt asking what they want to share
-        followup_blocks = [
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"Thanks for your response! Would you like to share anything with the team?"
-                }
-            },
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "Public Share",
-                            "emoji": True
-                        },
-                        "value": f"public_{action_id}",
-                        "action_id": "health_share_public",
-                        "style": "primary"
-                    },
-                    {
-                        "type": "button",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "Private Share",
-                            "emoji": True
-                        },
-                        "value": f"private_{action_id}",
-                        "action_id": "health_share_private"
-                    },
-                    {
-                        "type": "button",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "No Thanks",
-                            "emoji": True
-                        },
-                        "value": f"no_share_{action_id}",
-                        "action_id": "health_no_share"
+        # Send follow-up prompt asking what they want to share (only if not using response_url)
+        if not response_url:
+            followup_blocks = [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"Thanks for your response! Would you like to share anything with the team?"
                     }
-                ]
-            }
-        ]
-        
-        # Send the follow-up prompt
-        bot.send_dm(user_id, "Thanks for your response! Would you like to share anything with the team?", blocks=followup_blocks)
+                },
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {
+                                "type": "plain_text",
+                                "text": "Public Share",
+                                "emoji": True
+                            },
+                            "value": f"public_{action_id}",
+                            "action_id": "health_share_public",
+                            "style": "primary"
+                        },
+                        {
+                            "type": "button",
+                            "text": {
+                                "type": "plain_text",
+                                "text": "Private Share",
+                                "emoji": True
+                            },
+                            "value": f"private_{action_id}",
+                            "action_id": "health_share_private"
+                        },
+                        {
+                            "type": "button",
+                            "text": {
+                                "type": "plain_text",
+                                "text": "No Thanks",
+                                "emoji": True
+                            },
+                            "value": f"no_share_{action_id}",
+                            "action_id": "health_no_share"
+                        }
+                    ]
+                }
+            ]
+            
+            # Send the follow-up prompt
+            bot.send_dm(user_id, "Thanks for your response! Would you like to share anything with the team?", blocks=followup_blocks)
         
         return {"response_action": "clear"}
         
@@ -2397,48 +2466,48 @@ def handle_blocker_direct_resolution_submission(bot, payload):
                     
                     # Notify the blocked user via DM
                     bot.send_dm(blocked_user_id, f"🎉 Your blocker for {kr_name} has been resolved by @{user_name}!")
-            
-            # Update in Coda if available
-            if bot.coda:
-                try:
-                    # Mark blocker as complete (we'll need to find the actual blocker ID)
-                    # For now, we'll update the KR status
-                    kr_success = bot.coda.resolve_blocker_from_kr(
-                        kr_name=kr_name,
-                        resolution_notes=resolution_notes
-                    )
-                    if kr_success:
-                        print(f"✅ KR status updated to 'Unblocked' for {kr_name}")
+                    
+                    # Update in Coda if available
+                    if bot.coda:
+                        try:
+                            # Mark blocker as complete (we'll need to find the actual blocker ID)
+                            # For now, we'll update the KR status
+                            kr_success = bot.coda.resolve_blocker_from_kr(
+                                kr_name=kr_name,
+                                resolution_notes=resolution_notes
+                            )
+                            if kr_success:
+                                print(f"✅ KR status updated to 'Unblocked' for {kr_name}")
                                 bot.send_dm(user_id, "✅ KR status updated to 'Unblocked'!")
-                    else:
-                        print(f"⚠️ Failed to update KR status for {kr_name}")
+                            else:
+                                print(f"⚠️ Failed to update KR status for {kr_name}")
                                 bot.send_dm(user_id, "⚠️ Failed to update KR status")
-                        
-                    # Send completion notification to leads channel
-                    try:
-                        from datetime import datetime
-                        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        
-                        completion_message = f"🎉 *Blocker Resolved* - @{user_name} has successfully resolved a blocker!"
-                        completion_message += f"\n• *KR:* {kr_name}"
-                        completion_message += f"\n• *Resolved by:* @{user_name}"
-                        completion_message += f"\n• *Resolved at:* {current_time}"
-                        completion_message += f"\n• *Resolution notes:* {resolution_notes}"
-                        completion_message += f"\n• *Status:* KR status updated to 'Unblocked' in Coda"
-                        
-                        bot.send_completion_message_to_accessible_channel(completion_message)
-                        print(f"✅ Sent completion message to leads channel")
-                    except Exception as channel_error:
-                        print(f"⚠️ Error sending completion message to channel: {channel_error}")
-                        
-                except Exception as e:
-                    print(f"❌ Error updating Coda: {e}")
+                                
+                            # Send completion notification to leads channel
+                            try:
+                                from datetime import datetime
+                                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                
+                                completion_message = f"🎉 *Blocker Resolved* - @{user_name} has successfully resolved a blocker!"
+                                completion_message += f"\n• *KR:* {kr_name}"
+                                completion_message += f"\n• *Resolved by:* @{user_name}"
+                                completion_message += f"\n• *Resolved at:* {current_time}"
+                                completion_message += f"\n• *Resolution notes:* {resolution_notes}"
+                                completion_message += f"\n• *Status:* KR status updated to 'Unblocked' in Coda"
+                                
+                                bot.send_completion_message_to_accessible_channel(completion_message)
+                                print(f"✅ Sent completion message to leads channel")
+                            except Exception as channel_error:
+                                print(f"⚠️ Error sending completion message to channel: {channel_error}")
+                                
+                        except Exception as e:
+                            print(f"❌ Error updating Coda: {e}")
                             bot.send_dm(user_id, f"⚠️ Error updating Coda: {e}")
                     else:
                         bot.send_dm(user_id, "⚠️ Coda service not available")
-            
-            print(f"✅ Blocker resolved by {user_name}")
-            
+                    
+                    print(f"✅ Blocker resolved by {user_name}")
+                    
                     # Send final confirmation DM to resolver
                     bot.send_dm(user_id, f"✅ Blocker resolution completed for {kr_name}!")
                     
@@ -3598,31 +3667,31 @@ def handle_kr_continue_submit(bot, payload):
         
         # Process KR search in background to avoid Slack timeout
         def process_kr_search_in_background():
-        try:
-            # Search for KR in Coda
-            if bot.coda:
+            try:
+                # Search for KR in Coda
+                if bot.coda:
                     search_results = bot.coda.search_kr_table(search_term)
-                
-                if search_results:
-                    # Format and send results
-                    result_text = f"✅ *KR found for Sprint {sprint_number}!*\n\n"
-                    for result in search_results[:5]:  # Limit to 5 results
-                        result_text += f"• *{result.get('name', 'Unknown')}*\n"
-                        if result.get('owner'):
-                            result_text += f"  Owner: {result['owner']}\n"
-                        if result.get('status'):
-                            result_text += f"  Status: {result['status']}\n"
-                        result_text += "\n"
                     
-                    bot.send_dm(user_id, result_text)
+                    if search_results:
+                        # Format and send results
+                        result_text = f"✅ *KR found for Sprint {sprint_number}!*\n\n"
+                        for result in search_results[:5]:  # Limit to 5 results
+                            result_text += f"• *{result.get('name', 'Unknown')}*\n"
+                            if result.get('owner'):
+                                result_text += f"  Owner: {result['owner']}\n"
+                            if result.get('status'):
+                                result_text += f"  Status: {result['status']}\n"
+                            result_text += "\n"
+                        
+                        bot.send_dm(user_id, result_text)
+                    else:
+                        bot.send_dm(user_id, f"❌ No KR found matching '{search_term}' in Sprint {sprint_number}. Please check your search term and sprint number.")
                 else:
-                    bot.send_dm(user_id, f"❌ No KR found matching '{search_term}' in Sprint {sprint_number}. Please check your search term and sprint number.")
-            else:
-                bot.send_dm(user_id, f"✅ KR request submitted!\n\n*Search Term:* {search_term}\n*Sprint:* {sprint_number}")
-                
-        except Exception as e:
-            print(f"❌ Error processing KR request: {e}")
-            bot.send_dm(user_id, "❌ Error processing KR request. Please try again.")
+                    bot.send_dm(user_id, f"✅ KR request submitted!\n\n*Search Term:* {search_term}\n*Sprint:* {sprint_number}")
+                    
+            except Exception as e:
+                print(f"❌ Error processing KR request: {e}")
+                bot.send_dm(user_id, "❌ Error processing KR request. Please try again.")
         
         # Start background processing
         import threading
@@ -3675,24 +3744,24 @@ def handle_blocker_continue_submit(bot, payload):
         
         # Process blocker submission in background to avoid Slack timeout
         def process_blocker_submission_in_background():
-        try:
-            # Escalate the blocker to the channel
-            bot.escalate_blocker_with_details(
-                user_id=user_id,
-                user_name=user_name,
-                blocker_description=blocker_description,
-                kr_name=kr_name,
-                urgency=urgency,
-                notes=notes,
-                sprint_number=sprint_number
-            )
-            
-            # Send confirmation to user
+            try:
+                # Escalate the blocker to the channel
+                bot.escalate_blocker_with_details(
+                    user_id=user_id,
+                    user_name=user_name,
+                    blocker_description=blocker_description,
+                    kr_name=kr_name,
+                    urgency=urgency,
+                    notes=notes,
+                    sprint_number=sprint_number
+                )
+                
+                # Send confirmation to user
                 bot.send_dm(user_id, f"✅ Blocker submitted successfully!\n\n*KR:* {kr_name}\n*Description:* {blocker_description}\n*Urgency:* {urgency.title()}\n*Sprint:* {sprint_number}\n\nYour blocker has been escalated to the team so anyone can help resolve it!")
-            
-        except Exception as e:
-            print(f"❌ Error processing blocker submission: {e}")
-            bot.send_dm(user_id, "❌ Error processing blocker submission. Please try again.")
+                
+            except Exception as e:
+                print(f"❌ Error processing blocker submission: {e}")
+                bot.send_dm(user_id, "❌ Error processing blocker submission. Please try again.")
         
         # Start background processing
         import threading
