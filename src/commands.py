@@ -5,7 +5,7 @@ import time
 # Removed Flask imports - using Socket Mode
 from .utils import logger, error_handler, input_validator, safe_executor
 
-def _process_command(bot, user_id, command, text="", channel_id=None):
+def _process_command(bot, user_id, command, text="", channel_id=None, trigger_id=None):
     """Process slash commands."""
     user_name = bot.get_user_name(user_id)
     print(f"Processing command '{command}' from user {user_name} ({user_id})")
@@ -15,11 +15,11 @@ def _process_command(bot, user_id, command, text="", channel_id=None):
     elif command == 'kr':
         return _handle_kr_command(bot, user_id, text, channel_id)
     elif command == 'checkin':
-        return _handle_checkin_command(bot, user_id, channel_id)
+        return _handle_checkin_command(bot, user_id, channel_id, trigger_id)
     elif command == 'blocked':
         return _handle_blocked_command(bot, user_id, channel_id)
     elif command == 'health':
-        return _handle_health_command(bot, user_id, channel_id)
+        return _handle_health_command(bot, user_id, channel_id, trigger_id)
     elif command == 'role':
         return _handle_role_command(bot, user_id, text, channel_id)
     elif command == 'rolelist':
@@ -31,7 +31,7 @@ def _process_command(bot, user_id, command, text="", channel_id=None):
     elif command == 'test_health':
         return _handle_test_health_command(bot, user_id, channel_id)
     elif command in ['blocker', 'blockers']:
-        return _handle_blocker_command(bot, user_id, channel_id)
+        return _handle_blocker_command(bot, user_id, channel_id, trigger_id)
     else:
         print(f"Unknown command: {command}")
         return False
@@ -176,28 +176,65 @@ def _handle_kr_command(bot, user_id, text, channel_id):
         print(f"❌ Error in KR command handler: {e}")
         return False
 
-def _handle_checkin_command(bot, user_id, channel_id):
-    """Handle /checkin command - send standup prompt to DM."""
+def _handle_checkin_command(bot, user_id, channel_id, trigger_id=None):
+    """Handle /checkin command - open checkin modal directly."""
     try:
-        import threading
-        def process_checkin_command():
-            try:
-                # Add a small delay to avoid rate limiting
-                time.sleep(1.0)  # Increased delay for free workspace
-                # Send standup with error handling
+        if trigger_id:
+            # Open modal directly if we have a trigger_id (from slash command)
+            success = bot.open_checkin_modal(trigger_id, user_id)
+            if success:
+                print(f"✅ Checkin modal opened successfully for {user_id}")
+                return True
+            else:
+                print(f"❌ Failed to open checkin modal for {user_id}")
+                return False
+        else:
+            # Fallback: send DM with button to open modal
+            import threading
+            def process_checkin_command():
                 try:
-                    bot.send_standup_to_dm(user_id)
-                    print(f"✅ Standup prompt sent successfully to {user_id}")
+                    # Add a small delay to avoid rate limiting
+                    time.sleep(1.0)
+                    
+                    # Send a DM with a button to open the checkin modal
+                    blocks = [
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "🤖 *Daily Check-in*\n\nClick the button below to open your check-in form:"
+                            }
+                        },
+                        {
+                            "type": "actions",
+                            "elements": [
+                                {
+                                    "type": "button",
+                                    "text": {
+                                        "type": "plain_text",
+                                        "text": "Open Check-in Form"
+                                    },
+                                    "action_id": "open_checkin_modal",
+                                    "value": f"open_checkin_{user_id}",
+                                    "style": "primary"
+                                }
+                            ]
+                        }
+                    ]
+                    
+                    bot.send_dm_with_blocks(user_id, "Daily Check-in", blocks)
+                    print(f"✅ Checkin prompt sent successfully to {user_id}")
+                    
                 except Exception as e:
-                    print(f"❌ Error sending standup prompt: {e}")
-                    # Don't try to send error message to avoid cascading failures
-            except Exception as e:
-                print(f"❌ Error in background checkin processing: {e}")
-                # Don't try to send error message to avoid cascading failures
-        thread = threading.Thread(target=process_checkin_command)
-        thread.daemon = True
-        thread.start()
-        return True
+                    print(f"❌ Error sending checkin prompt: {e}")
+                    # Fallback to simple text message
+                    bot.send_dm(user_id, "🤖 Daily Check-in\n\nPlease use the button in the message above to open your check-in form.")
+                    
+            thread = threading.Thread(target=process_checkin_command)
+            thread.daemon = True
+            thread.start()
+            return True
+            
     except Exception as e:
         print(f"❌ Error in checkin command handler: {e}")
         return False
@@ -252,28 +289,89 @@ def _handle_blocked_command(bot, user_id, channel_id):
         print(f"❌ Error in blocked command handler: {e}")
         return False
 
-def _handle_health_command(bot, user_id, channel_id):
-    """Handle /health command - send health check to DM."""
+def _handle_health_command(bot, user_id, channel_id, trigger_id=None):
+    """Handle /health command - send health check with Block Kit buttons."""
     try:
-        import threading
-        def process_health_command():
+        # Create the Block Kit message
+        blocks = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": "Daily Health Check",
+                    "emoji": True
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "How are you feeling today?"
+                }
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Great", "emoji": True},
+                        "style": "primary",
+                        "action_id": "health_check_great"
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Okay", "emoji": True},
+                        "action_id": "health_check_okay"
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Not Great", "emoji": True},
+                        "style": "danger",
+                        "action_id": "health_check_not_great"
+                    }
+                ]
+            }
+        ]
+        
+        if trigger_id:
+            # If we have a trigger_id (from slash command), send as ephemeral response
             try:
-                # Add a small delay to avoid rate limiting
-                time.sleep(1.0)  # Increased delay for free workspace
-                # Send health check with error handling
-                try:
-                    bot.send_health_check_to_dm(user_id)
-                    print(f"✅ Health check prompt sent successfully to {user_id}")
-                except Exception as e:
-                    print(f"❌ Error sending health check prompt: {e}")
-                    # Don't try to send error message to avoid cascading failures
+                bot.client.chat_postEphemeral(
+                    channel=channel_id,
+                    user=user_id,
+                    text="Daily Health Check",
+                    blocks=blocks
+                )
+                print(f"✅ Health check sent successfully to {user_id}")
+                return True
             except Exception as e:
-                print(f"❌ Error in background health processing: {e}")
-                # Don't try to send error message to avoid cascading failures
-        thread = threading.Thread(target=process_health_command)
-        thread.daemon = True
-        thread.start()
-        return True
+                print(f"❌ Error sending ephemeral health check: {e}")
+                return False
+        else:
+            # Fallback: send DM with health check buttons
+            import threading
+            def process_health_command():
+                try:
+                    # Add a small delay to avoid rate limiting
+                    time.sleep(1.0)
+                    
+                    # Send health check with Block Kit buttons
+                    try:
+                        bot.send_dm_with_blocks(user_id, "Daily Health Check", blocks)
+                        print(f"✅ Health check prompt sent successfully to {user_id}")
+                    except Exception as e:
+                        print(f"❌ Error sending health check prompt: {e}")
+                        # Fallback to simple text message
+                        bot.send_dm(user_id, "🤖 Daily Health Check\n\nHow are you feeling today?\n\n• Great\n• Okay\n• Not Great")
+                        
+                except Exception as e:
+                    print(f"❌ Error in background health processing: {e}")
+                    
+            thread = threading.Thread(target=process_health_command)
+            thread.daemon = True
+            thread.start()
+            return True
+            
     except Exception as e:
         print(f"❌ Error in health command handler: {e}")
         return False
@@ -368,52 +466,142 @@ def _handle_test_health_command(bot, user_id, channel_id):
     bot.send_dm(user_id, f"✅ @{user_name} Health check triggered manually!")
     return True
 
-def _handle_blocker_command(bot, user_id, channel_id):
-    """Handle /blocker command with sprint number requirement and field memory."""
+def _handle_blocker_command(bot, user_id, channel_id, trigger_id=None):
+    """Handle /blocker command - open blocker modal directly."""
     try:
-        import threading
-        
-        def process_blocker_command():
-            try:
-                # Add a small delay to avoid rate limiting
-                time.sleep(1.0)
-                
-                # Get user info with error handling
+        if trigger_id:
+            # Open blocker report modal directly if we have a trigger_id (from slash command)
+            blocks = [
+                {
+                    "type": "input",
+                    "block_id": "kr_name",
+                    "label": {
+                        "type": "plain_text",
+                        "text": "Key Result (KR) Name"
+                    },
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "kr_name_input",
+                        "placeholder": {
+                            "type": "plain_text",
+                            "text": "Enter the name of the KR you're blocked on..."
+                        }
+                    }
+                },
+                {
+                    "type": "input",
+                    "block_id": "blocker_description",
+                    "label": {
+                        "type": "plain_text",
+                        "text": "Describe the Blocker"
+                    },
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "blocker_description_input",
+                        "multiline": True,
+                        "placeholder": {
+                            "type": "plain_text",
+                            "text": "What's blocking you? Be specific about the issue..."
+                        }
+                    }
+                },
+                {
+                    "type": "input",
+                    "block_id": "urgency",
+                    "label": {
+                        "type": "plain_text",
+                        "text": "Urgency Level"
+                    },
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "urgency_input",
+                        "placeholder": {
+                            "type": "plain_text",
+                            "text": "How urgent is this blocker?"
+                        },
+                        "options": [
+                            {
+                                "text": {"type": "plain_text", "text": "🚨 High - Critical blocker"},
+                                "value": "high"
+                            },
+                            {
+                                "text": {"type": "plain_text", "text": "⚠️ Medium - Important but not critical"},
+                                "value": "medium"
+                            },
+                            {
+                                "text": {"type": "plain_text", "text": "ℹ️ Low - Minor issue"},
+                                "value": "low"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "type": "input",
+                    "block_id": "sprint_number",
+                    "label": {
+                        "type": "plain_text",
+                        "text": "Sprint Number"
+                    },
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "sprint_number_input",
+                        "placeholder": {
+                            "type": "plain_text",
+                            "text": "e.g., 5"
+                        }
+                    },
+                    "optional": True
+                },
+                {
+                    "type": "input",
+                    "block_id": "notes",
+                    "label": {
+                        "type": "plain_text",
+                        "text": "Additional Notes (optional)"
+                    },
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "notes_input",
+                        "multiline": True,
+                        "placeholder": {
+                            "type": "plain_text",
+                            "text": "Any additional context or information..."
+                        }
+                    },
+                    "optional": True
+                }
+            ]
+            
+            success = bot.open_modal(
+                trigger_id=trigger_id,
+                title="Report Blocker",
+                blocks=blocks,
+                submit_text="Submit Blocker Report",
+                callback_id="blocker_report_submit"
+            )
+            
+            if success:
+                print(f"✅ Blocker modal opened successfully for {user_id}")
+                return True
+            else:
+                print(f"❌ Failed to open blocker modal for {user_id}")
+                return False
+        else:
+            # Fallback: send DM with button to open modal
+            import threading
+            
+            def process_blocker_command():
                 try:
-                    user_info = bot.client.users_info(user=user_id)
-                    user_name = user_info['user']['real_name']
-                except Exception as e:
-                    print(f"❌ Error getting user info: {e}")
-                    user_name = f"User {user_id}"
-                
-                # Check if user has pending blocker data to continue
-                if hasattr(bot, 'blocker_pending_data') and user_id in bot.blocker_pending_data:
-                    pending_data = bot.blocker_pending_data[user_id]
-                    bot.send_blocker_continue_form(user_id, user_name, pending_data)
-                else:
-                    # Send the original form asking for sprint number
+                    # Add a small delay to avoid rate limiting
+                    time.sleep(1.0)
+                    
+                    # Send a DM with a button to open the blocker modal
                     blocks = [
                         {
                             "type": "section",
                             "text": {
                                 "type": "mrkdwn",
-                                "text": "*View Your Blockers*\n\nPlease specify a sprint number to view your blockers:"
-                            }
-                        },
-                        {
-                            "type": "input",
-                            "block_id": "sprint_number",
-                            "label": {
-                                "type": "plain_text",
-                                "text": "Sprint Number"
-                            },
-                            "element": {
-                                "type": "plain_text_input",
-                                "action_id": "sprint_number_input",
-                                "placeholder": {
-                                    "type": "plain_text",
-                                    "text": "e.g., 5"
-                                }
+                                "text": "🚨 *Report a Blocker*\n\nClick the button below to open the blocker report form:"
                             }
                         },
                         {
@@ -423,26 +611,29 @@ def _handle_blocker_command(bot, user_id, channel_id):
                                     "type": "button",
                                     "text": {
                                         "type": "plain_text",
-                                        "text": "View Blockers"
+                                        "text": "Report Blocker"
                                     },
-                                    "action_id": "view_blockers_with_sprint",
-                                    "value": user_id
+                                    "action_id": "open_blocker_report_modal",
+                                    "value": f"open_blocker_{user_id}",
+                                    "style": "danger"
                                 }
                             ]
                         }
                     ]
                     
-                    bot.send_dm(user_id, "Please specify a sprint number to view your blockers:", blocks=blocks)
-                
-            except Exception as e:
-                print(f"❌ Error in background blocker processing: {e}")
-                bot.send_dm(user_id, "❌ Error processing blocker command. Please try again.")
-        
-        thread = threading.Thread(target=process_blocker_command)
-        thread.daemon = True
-        thread.start()
-        
-        return True
+                    bot.send_dm_with_blocks(user_id, "Report a Blocker", blocks)
+                    print(f"✅ Blocker prompt sent successfully to {user_id}")
+                    
+                except Exception as e:
+                    print(f"❌ Error sending blocker prompt: {e}")
+                    # Fallback to simple text message
+                    bot.send_dm(user_id, "🚨 Report a Blocker\n\nPlease use the button in the message above to open the blocker report form.")
+                    
+            thread = threading.Thread(target=process_blocker_command)
+            thread.daemon = True
+            thread.start()
+            return True
+            
     except Exception as e:
         print(f"❌ Error in blocker command handler: {e}")
         return False
