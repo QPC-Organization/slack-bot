@@ -656,7 +656,8 @@ def handle_view_submission(bot, payload):
             return handle_blocker_note_submission(bot, payload)
         elif callback_id == 'progress_update_submit':
             return handle_progress_update_submission(bot, payload)
-        # Removed blocker_report_submit to prevent duplicate saves
+        elif callback_id == 'blocker_report_submit':
+            return handle_blocker_details_submission(bot, payload)
         elif callback_id == 'health_public_share_submit':
             return handle_health_public_share_submission(bot, payload)
         elif callback_id == 'health_private_share_submission':
@@ -730,6 +731,7 @@ def handle_checkin_submission(bot, payload):
         # Process in background thread to avoid Slack timeout
         def process_checkin_in_background():
             try:
+                print(f"📝 Checkin submission received from {user_name} ({user_id})")
                 # Convert status values to readable format
                 track_display = {
                     'yes': '✅ Yes - On track',
@@ -742,13 +744,15 @@ def handle_checkin_submission(bot, payload):
                 }.get(blockers_status, blockers_status)
                 
                 # Check if check-in is late (submitted after 4 PM EST)
-                from datetime import datetime, timezone
-                import pytz
+                from datetime import datetime, timezone, timedelta
                 
-                est_tz = pytz.timezone('US/Eastern')
-                current_est = datetime.now(est_tz)
-                scheduled_time = current_est.replace(hour=16, minute=0, second=0, microsecond=0)  # 4 PM
-                is_late = current_est > scheduled_time
+                # Get current UTC time and convert to EST (UTC-5)
+                current_utc = datetime.now(timezone.utc)
+                est_offset = timedelta(hours=-5)
+                current_est = (current_utc + est_offset)
+                
+                # Check if current time is after 4 PM (16:00) EST
+                is_late = current_est.hour >= 16
                 
                 # Save to Coda
                 if bot.coda:
@@ -770,6 +774,8 @@ def handle_checkin_submission(bot, payload):
                 
                 # Send simple confirmation message
                 response_text = "✅ *Check-in submitted successfully!*"
+                
+                print(f"✅ Checkin processed successfully for {user_name}")
                 
                 if is_late:
                     response_text += f"\n⚠️ *Note: This check-in was submitted late and has been tagged accordingly.*"
@@ -822,8 +828,10 @@ def handle_checkin_submission(bot, payload):
                     bot.send_dm(user_id, "", blocks=blocks)
                 
             except Exception as e:
-                print(f"Error in background checkin processing: {e}")
-                bot.send_dm(user_id, "❌ Sorry, there was an error processing your check-in. Please try again.")
+                print(f"❌ Error in background checkin processing: {e}")
+                import traceback
+                traceback.print_exc()
+                bot.send_dm(user_id, f"❌ Sorry, there was an error processing your check-in: {e}. Please try again.")
         
         # Start background thread
         import threading
@@ -835,14 +843,21 @@ def handle_checkin_submission(bot, payload):
         return {"response_action": "clear"}
         
     except Exception as e:
-        print(f"Error handling checkin submission: {e}")
+        print(f"❌ Error handling checkin submission: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            user_id = payload.get('user', {}).get('id') if payload else None
+            if user_id:
+                bot.send_dm(user_id, "❌ Sorry, there was an error processing your check-in. Please try again.")
+        except:
+            pass
         return {"response_action": "clear"}
 
 # Removed duplicate handle_blocker_submission function - using handle_blocker_details_submission instead
 
 def handle_blocker_details_submission(bot, payload):
     """Handle blocker details modal submission from the blocker report form."""
-    print(f"🔍 DEBUG: handle_blocker_details_submission called")
     try:
         user_id = payload['user']['id']
         user_name = bot.get_user_name(user_id)
@@ -855,7 +870,11 @@ def handle_blocker_details_submission(bot, payload):
         urgency = values.get('urgency', {}).get('urgency_input', {}).get('selected_option', {}).get('value', 'medium')
         notes = values.get('notes', {}).get('notes_input', {}).get('value', '').strip()
         
-        print(f"🔍 DEBUG: Extracted blocker details - Sprint: {sprint_number}, Description: {blocker_description}, KR: {kr_name}, Urgency: {urgency}, Notes: {notes}")
+        print(f"📝 Blocker submission received from {user_name} ({user_id})")
+        print(f"   KR: {kr_name}")
+        print(f"   Description: {blocker_description[:100]}...")
+        print(f"   Urgency: {urgency}")
+        print(f"   Sprint: {sprint_number if sprint_number else 'N/A'}")
         
         # Validate required fields
         if not blocker_description:
@@ -889,7 +908,7 @@ def handle_blocker_details_submission(bot, payload):
                 # Call the escalation method without sprint number to avoid Coda column issues
                 bot.escalate_blocker_with_details(user_id, user_name, blocker_description, kr_name, urgency, notes)
                 bot.send_dm(user_id, f"✅ Blocker processed and escalated! Your team will be notified.")
-                print(f"✅ Blocker submitted successfully by {user_name}")
+                print(f"✅ Blocker escalated successfully for {user_name} on KR: {kr_name}")
             except Exception as escalation_error:
                 print(f"❌ Error escalating blocker: {escalation_error}")
                 bot.send_dm(user_id, "❌ Sorry, there was an error processing your blocker. Please try again or contact support.")
@@ -2606,7 +2625,7 @@ def handle_open_blocker_report_modal(bot, payload):
     try:
         print(f"🔍 DEBUG: handle_open_blocker_report_modal called with payload: {payload}")
         
-        # Get the correct user ID from the mentor check value in the button
+        # Get the correct user ID from the button value
         actions = payload.get('actions', [])
         if actions:
             value = actions[0].get('value', '')
@@ -2622,96 +2641,35 @@ def handle_open_blocker_report_modal(bot, payload):
                 print(f"🔍 DEBUG: Actual user ID from button value: {actual_user_id}")
             else:
                 print(f"❌ DEBUG: Could not parse user ID from button value: {value}")
-                return {"response_action": "clear"}
+                # Try to use current user as fallback
+                actual_user_id = payload['user']['id']
+                print(f"🔍 DEBUG: Using current user as fallback: {actual_user_id}")
         else:
             print(f"❌ DEBUG: No actions found in payload")
-            return {"response_action": "clear"}
+            # Try to use current user as fallback
+            actual_user_id = payload['user']['id']
+            print(f"🔍 DEBUG: Using current user as fallback: {actual_user_id}")
         
         user_name = bot.get_user_name(actual_user_id)
         print(f"🔍 DEBUG: Creating blocker form for user: {user_name}")
         
-        # Open a modal with the blocker form (same as checkin)
+        # Check if trigger_id exists
         trigger_id = payload.get('trigger_id')
+        print(f"🔍 DEBUG: trigger_id: {trigger_id}")
+        
         if not trigger_id:
-            print(f"❌ DEBUG: No trigger_id available for modal")
-            # Fallback to sending a simple message
-            bot.send_dm(actual_user_id, f"🚨 Blocker Report for @{user_name}\n\nPlease use the `/blocked` command again to open the blocker form.")
+            print(f"❌ DEBUG: No trigger_id found in payload")
             return {"response_action": "clear"}
         
-        # Create modal blocks (same structure as checkin)
-        modal_blocks = [
-            {
-                "type": "input",
-                "block_id": "sprint_number",
-                "label": {"type": "plain_text", "text": "Sprint Number"},
-                "element": {
-                    "type": "plain_text_input",
-                    "action_id": "sprint_number_input",
-                    "placeholder": {"type": "plain_text", "text": "e.g., 5"}
-                }
-            },
-            {
-                "type": "input",
-                "block_id": "blocker_description",
-                "label": {"type": "plain_text", "text": "What's blocking you?"},
-                "element": {
-                    "type": "plain_text_input",
-                    "action_id": "blocker_description_input",
-                    "multiline": True,
-                    "placeholder": {"type": "plain_text", "text": "Describe the blocker in detail..."}
-                }
-            },
-            {
-                "type": "input",
-                "block_id": "kr_name",
-                "label": {"type": "plain_text", "text": "Key Result (KR) Name"},
-                "element": {
-                    "type": "plain_text_input",
-                    "action_id": "kr_name_input",
-                    "placeholder": {"type": "plain_text", "text": "e.g., KR1: Increase user engagement"}
-                }
-            },
-            {
-                "type": "input",
-                "block_id": "urgency",
-                "label": {"type": "plain_text", "text": "Urgency Level"},
-                "element": {
-                    "type": "static_select",
-                    "action_id": "urgency_input",
-                    "placeholder": {"type": "plain_text", "text": "Select urgency level"},
-                    "options": [
-                        {"text": {"type": "plain_text", "text": "Low - Can wait a few days"}, "value": "Low"},
-                        {"text": {"type": "plain_text", "text": "Medium - Need help this week"}, "value": "Medium"},
-                        {"text": {"type": "plain_text", "text": "High - Blocking progress now"}, "value": "High"},
-                        {"text": {"type": "plain_text", "text": "Critical - Blocking team/delivery"}, "value": "Critical"}
-                    ]
-                }
-            },
-            {
-                "type": "input",
-                "block_id": "notes",
-                "label": {"type": "plain_text", "text": "Additional Notes (Optional)"},
-                "element": {
-                    "type": "plain_text_input",
-                    "action_id": "notes_input",
-                    "multiline": True,
-                    "placeholder": {"type": "plain_text", "text": "Any additional context or details..."}
-                }
-            }
-        ]
+        # Use the bot's open_blocker_modal method
+        success = bot.open_blocker_modal(trigger_id, actual_user_id)
         
-        # Open the modal
-        result = bot.open_modal(
-            trigger_id=trigger_id,
-            title="Submit Blocker Details",
-            blocks=modal_blocks,
-            submit_text="Submit Blocker",
-            callback_id="blocker_details_submit"
-        )
-        print(f"🔍 DEBUG: Blocker modal opened: {result}")
+        if success:
+            print(f"✅ DEBUG: Blocker modal opened successfully")
+        else:
+            print(f"❌ DEBUG: Failed to open blocker modal")
         
         return {"response_action": "clear"}
-        
     except Exception as e:
         print(f"❌ Error in handle_open_blocker_report_modal: {e}")
         import traceback

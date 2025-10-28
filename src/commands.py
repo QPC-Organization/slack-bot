@@ -471,114 +471,7 @@ def _handle_blocker_command(bot, user_id, channel_id, trigger_id=None):
     try:
         if trigger_id:
             # Open blocker report modal directly if we have a trigger_id (from slash command)
-            blocks = [
-                {
-                    "type": "input",
-                    "block_id": "kr_name",
-                    "label": {
-                        "type": "plain_text",
-                        "text": "Key Result (KR) Name"
-                    },
-                    "element": {
-                        "type": "plain_text_input",
-                        "action_id": "kr_name_input",
-                        "placeholder": {
-                            "type": "plain_text",
-                            "text": "Enter the name of the KR you're blocked on..."
-                        }
-                    }
-                },
-                {
-                    "type": "input",
-                    "block_id": "blocker_description",
-                    "label": {
-                        "type": "plain_text",
-                        "text": "Describe the Blocker"
-                    },
-                    "element": {
-                        "type": "plain_text_input",
-                        "action_id": "blocker_description_input",
-                        "multiline": True,
-                        "placeholder": {
-                            "type": "plain_text",
-                            "text": "What's blocking you? Be specific about the issue..."
-                        }
-                    }
-                },
-                {
-                    "type": "input",
-                    "block_id": "urgency",
-                    "label": {
-                        "type": "plain_text",
-                        "text": "Urgency Level"
-                    },
-                    "element": {
-                        "type": "static_select",
-                        "action_id": "urgency_input",
-                        "placeholder": {
-                            "type": "plain_text",
-                            "text": "How urgent is this blocker?"
-                        },
-                        "options": [
-                            {
-                                "text": {"type": "plain_text", "text": "🚨 High - Critical blocker"},
-                                "value": "high"
-                            },
-                            {
-                                "text": {"type": "plain_text", "text": "⚠️ Medium - Important but not critical"},
-                                "value": "medium"
-                            },
-                            {
-                                "text": {"type": "plain_text", "text": "ℹ️ Low - Minor issue"},
-                                "value": "low"
-                            }
-                        ]
-                    }
-                },
-                {
-                    "type": "input",
-                    "block_id": "sprint_number",
-                    "label": {
-                        "type": "plain_text",
-                        "text": "Sprint Number"
-                    },
-                    "element": {
-                        "type": "plain_text_input",
-                        "action_id": "sprint_number_input",
-                        "placeholder": {
-                            "type": "plain_text",
-                            "text": "e.g., 5"
-                        }
-                    },
-                    "optional": True
-                },
-                {
-                    "type": "input",
-                    "block_id": "notes",
-                    "label": {
-                        "type": "plain_text",
-                        "text": "Additional Notes (optional)"
-                    },
-                    "element": {
-                        "type": "plain_text_input",
-                        "action_id": "notes_input",
-                        "multiline": True,
-                        "placeholder": {
-                            "type": "plain_text",
-                            "text": "Any additional context or information..."
-                        }
-                    },
-                    "optional": True
-                }
-            ]
-            
-            success = bot.open_modal(
-                trigger_id=trigger_id,
-                title="Report Blocker",
-                blocks=blocks,
-                submit_text="Submit Blocker Report",
-                callback_id="blocker_report_submit"
-            )
+            success = bot.open_blocker_modal(trigger_id, user_id)
             
             if success:
                 print(f"✅ Blocker modal opened successfully for {user_id}")
@@ -614,7 +507,7 @@ def _handle_blocker_command(bot, user_id, channel_id, trigger_id=None):
                                         "text": "Report Blocker"
                                     },
                                     "action_id": "open_blocker_report_modal",
-                                    "value": f"open_blocker_{user_id}",
+                                    "value": f"blocker_report_{user_id}",
                                     "style": "danger"
                                 }
                             ]

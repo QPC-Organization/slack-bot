@@ -373,7 +373,9 @@ class DailyStandupBot:
     def _check_blocker_followups(self):
         """Check for blockers that need follow-up."""
         try:
-            current_time = datetime.now()
+            # Use timezone-aware datetime for proper comparison
+            from datetime import timezone
+            current_time = datetime.now(timezone.utc)
             print(f"🔍 Checking blocker followups at {current_time.strftime('%H:%M:%S')} - {len(self.active_blockers)} tracked blockers")
 
             # Check if it's time for follow-ups
@@ -393,11 +395,17 @@ class DailyStandupBot:
                     if not created_at:
                         continue
 
-                    # Parse creation time
+                    # Parse creation time - ensure it's timezone-aware
                     if isinstance(created_at, str):
                         created_time = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                        # If timezone-naive, make it timezone-aware (UTC)
+                        if created_time.tzinfo is None:
+                            created_time = created_time.replace(tzinfo=timezone.utc)
                     else:
                         created_time = created_at
+                        # If timezone-naive, make it timezone-aware (UTC)
+                        if created_time.tzinfo is None:
+                            created_time = created_time.replace(tzinfo=timezone.utc)
 
                     # Check if enough time has passed
                     time_diff = current_time - created_time
@@ -413,6 +421,8 @@ class DailyStandupBot:
 
                 except Exception as e:
                     print(f"⚠️ Error processing blocker followup: {e}")
+                    import traceback
+                    traceback.print_exc()
                     continue
 
         except Exception as e:
@@ -481,7 +491,7 @@ class DailyStandupBot:
         try:
             # Save to Coda first
             if self.coda:
-                success = self.coda.add_blocker(user_id, user_name, blocker_description, kr_name, urgency, notes, sprint_number)
+                success = self.coda.add_blocker(user_id, blocker_description, kr_name, urgency, notes, user_name, sprint_number)
                 if success:
                     print(f"✅ Blocker saved to Coda for {user_name}")
                 else:
@@ -562,17 +572,20 @@ class DailyStandupBot:
         except Exception as e:
             print(f"❌ Error tracking blocker for followup: {e}")
 
-    def send_dm(self, user_id: str, message: str):
+    def send_dm(self, user_id: str, message: str, blocks: list = None):
         """Send a direct message to a user."""
         try:
-            self.client.chat_postMessage(channel=user_id, text=message)
+            if blocks:
+                self.client.chat_postMessage(channel=user_id, text=message, blocks=blocks)
+            else:
+                self.client.chat_postMessage(channel=user_id, text=message)
         except Exception as e:
             print(f"❌ Error sending DM: {e}")
 
     def get_user_name(self, user_id: str) -> str:
         """Get a user's display name."""
         try:
-            response = self.client.users_info(user_id=user_id)
+            response = self.client.users_info(user=user_id)
             if response["ok"]:
                 user = response["user"]
                 return user.get("real_name") or user.get("name", "Unknown")
@@ -581,12 +594,18 @@ class DailyStandupBot:
             print(f"❌ Error getting user name: {e}")
             return "Unknown"
 
-    def update_message(self, channel_id: str, message_ts: str, new_text: str):
+    def update_message(self, channel_id: str, message_ts: str, new_text: str, blocks: list = None):
         """Update an existing message."""
         try:
-            self.client.chat_update(channel=channel_id, ts=message_ts, text=new_text)
+            if blocks:
+                self.client.chat_update(channel=channel_id, ts=message_ts, text=new_text, blocks=blocks)
+            else:
+                self.client.chat_update(channel=channel_id, ts=message_ts, text=new_text)
         except Exception as e:
             print(f"❌ Error updating message: {e}")
+            import traceback
+            traceback.print_exc()
+            print(f"❌ DEBUG: channel_id={channel_id}, message_ts={message_ts}, text length={len(new_text) if new_text else 0}, blocks={blocks is not None}")
 
     def send_completion_message_to_accessible_channel(self, message: str):
         """Send completion message to an accessible channel."""
@@ -634,7 +653,7 @@ class DailyStandupBot:
             )
             
             if response["ok"]:
-                print(f"✅ Modal '{title}' opened successfully")
+                print(f"✅ Modal '{title}' opened successfully (callback_id: {callback_id})")
                 return True
             else:
                 print(f"❌ Failed to open modal '{title}': {response.get('error', 'Unknown error')}")
@@ -747,6 +766,122 @@ class DailyStandupBot:
             
         except Exception as e:
             print(f"❌ Error opening checkin modal: {e}")
+            return False
+
+    def open_blocker_modal(self, trigger_id: str, user_id: str):
+        """Open the blocker report modal directly."""
+        try:
+            blocks = [
+                {
+                    "type": "input",
+                    "block_id": "kr_name",
+                    "label": {
+                        "type": "plain_text",
+                        "text": "Key Result (KR) Name"
+                    },
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "kr_name_input",
+                        "placeholder": {
+                            "type": "plain_text",
+                            "text": "Enter the name of the KR you're blocked on..."
+                        }
+                    }
+                },
+                {
+                    "type": "input",
+                    "block_id": "blocker_description",
+                    "label": {
+                        "type": "plain_text",
+                        "text": "Describe the Blocker"
+                    },
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "blocker_description_input",
+                        "multiline": True,
+                        "placeholder": {
+                            "type": "plain_text",
+                            "text": "What's blocking you? Be specific about the issue..."
+                        }
+                    }
+                },
+                {
+                    "type": "input",
+                    "block_id": "urgency",
+                    "label": {
+                        "type": "plain_text",
+                        "text": "Urgency Level"
+                    },
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "urgency_input",
+                        "placeholder": {
+                            "type": "plain_text",
+                            "text": "How urgent is this blocker?"
+                        },
+                        "options": [
+                            {
+                                "text": {"type": "plain_text", "text": "🚨 High - Critical blocker"},
+                                "value": "high"
+                            },
+                            {
+                                "text": {"type": "plain_text", "text": "⚠️ Medium - Important but not critical"},
+                                "value": "medium"
+                            },
+                            {
+                                "text": {"type": "plain_text", "text": "ℹ️ Low - Minor issue"},
+                                "value": "low"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "type": "input",
+                    "block_id": "sprint_number",
+                    "label": {
+                        "type": "plain_text",
+                        "text": "Sprint Number"
+                    },
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "sprint_number_input",
+                        "placeholder": {
+                            "type": "plain_text",
+                            "text": "e.g., 5"
+                        }
+                    },
+                    "optional": True
+                },
+                {
+                    "type": "input",
+                    "block_id": "notes",
+                    "label": {
+                        "type": "plain_text",
+                        "text": "Additional Notes (optional)"
+                    },
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "notes_input",
+                        "multiline": True,
+                        "placeholder": {
+                            "type": "plain_text",
+                            "text": "Any additional context or information..."
+                        }
+                    },
+                    "optional": True
+                }
+            ]
+            
+            return self.open_modal(
+                trigger_id=trigger_id,
+                title="Report Blocker",
+                blocks=blocks,
+                submit_text="Submit Blocker Report",
+                callback_id="blocker_details_submit"
+            )
+            
+        except Exception as e:
+            print(f"❌ Error opening blocker modal: {e}")
             return False
 
     def send_dm_with_blocks(self, user_id: str, text: str, blocks: list = None):
