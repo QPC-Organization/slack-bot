@@ -494,6 +494,21 @@ class DailyStandupBot:
                 success = self.coda.add_blocker(user_id, blocker_description, kr_name, urgency, notes, user_name, sprint_number)
                 if success:
                     print(f"✅ Blocker saved to Coda for {user_name}")
+                    if kr_name:
+                        try:
+                            kr_update_success = self.coda.update_kr_blocked_status(
+                                kr_name=kr_name,
+                                is_blocked=True,
+                                blocker_context=blocker_description,
+                                reported_by=user_name,
+                                reported_by_id=user_id
+                            )
+                            if kr_update_success:
+                                print(f"✅ KR '{kr_name}' marked as Blocked in Coda")
+                            else:
+                                print(f"⚠️ Unable to mark KR '{kr_name}' as Blocked in Coda")
+                        except Exception as kr_error:
+                            print(f"❌ Error updating KR '{kr_name}' status to Blocked: {kr_error}")
                 else:
                     print(f"⚠️ Failed to save blocker to Coda for {user_name}")
 
@@ -581,6 +596,66 @@ class DailyStandupBot:
                 self.client.chat_postMessage(channel=user_id, text=message)
         except Exception as e:
             print(f"❌ Error sending DM: {e}")
+
+    def send_mentor_check(
+        self,
+        user_id: str,
+        standup_ts: Optional[str],
+        user_name: str,
+        request_type: str,
+        channel: str,
+        search_term: Optional[str] = None,
+        sprint_number: Optional[int] = None,
+    ):
+        """Prompt the user to confirm they've reached out to their mentor before continuing."""
+        try:
+            # Track pending KR searches so we can resume after mentor confirmation
+            if not hasattr(self, "pending_kr_search"):
+                self.pending_kr_search = {}
+            if request_type == "kr":
+                self.pending_kr_search[user_id] = search_term if search_term else None
+                if not hasattr(self, "pending_kr_sprint"):
+                    self.pending_kr_sprint = {}
+                self.pending_kr_sprint[user_id] = sprint_number if sprint_number is not None else None
+
+            prompt_text = (
+                f"@{user_name}, before we proceed with your {request_type} request, I need to ask:\n"
+                ":thinking_face: Have you reached out to your mentor yet?"
+            )
+
+            blocks = [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": prompt_text,
+                    },
+                },
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "Yes"},
+                            "value": f"mentor_yes_{request_type}_{user_id}",
+                            "action_id": "mentor_yes",
+                        },
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "No"},
+                            "value": f"mentor_no_{request_type}_{user_id}",
+                            "action_id": "mentor_no",
+                        },
+                    ],
+                },
+            ]
+
+            self.client.chat_postMessage(channel=channel, text=prompt_text, blocks=blocks)
+            print(f"✅ Mentor check sent to {user_name} ({user_id}) for request type '{request_type}'")
+            return True
+        except Exception as e:
+            print(f"❌ Error sending mentor check: {e}")
+            return False
 
     def get_user_name(self, user_id: str) -> str:
         """Get a user's display name."""
