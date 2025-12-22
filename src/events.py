@@ -1386,6 +1386,8 @@ def handle_interactive_components(bot, payload):
             return safe_executor.execute(handle_kr_continue_submit, "handle_interactive_components", user_id, bot=bot, payload=payload)
         elif action_id == 'blocker_continue_submit':
             return safe_executor.execute(handle_blocker_continue_submit, "handle_interactive_components", user_id, bot=bot, payload=payload)
+        elif action_id == 'kr_mark_complete':
+            return safe_executor.execute(handle_kr_mark_complete, "handle_interactive_components", user_id, bot=bot, payload=payload)
         else:
             logger.warning(f"Unhandled action_id: {action_id}")
             return {"text": "OK"}
@@ -3733,6 +3735,57 @@ def handle_blocker_continue_submit(bot, payload):
     except Exception as e:
         print(f"Error handling blocker continue submit: {e}")
         bot.send_dm(user_id, "❌ Error processing blocker continue. Please try again.")
+        return {"response_action": "clear"}
+
+def handle_kr_mark_complete(bot, payload):
+    """Handle 'Mark as Complete' for KR list items."""
+    try:
+        user_id = payload['user']['id']
+        user_name = bot.get_user_name(user_id)
+        action = payload['actions'][0]
+        value = action.get('value', '')
+        channel_id = payload.get('channel', {}).get('id')
+        message_ts = payload.get('message', {}).get('ts')
+
+        # Expected value format: table_id|row_id|kr_name
+        try:
+            table_id, row_id, kr_name = value.split('|', 2)
+        except Exception:
+            bot.send_dm(user_id, "❌ Invalid KR reference; cannot complete.")
+            return {"response_action": "clear"}
+
+        if not bot.coda:
+            bot.send_dm(user_id, "⚠️ Coda is not configured; cannot update KR.")
+            return {"response_action": "clear"}
+
+        # Update KR as completed, then clean related blockers
+        try:
+            ok = bot.coda.mark_kr_complete(table_id=table_id, row_id=row_id)
+            if ok:
+                # Also remove/resolve related blockers for this KR
+                try:
+                    bot.coda.delete_blockers_for_kr(kr_name)
+                except Exception as _:
+                    pass
+
+                # Acknowledge
+                bot.send_dm(user_id, f"✅ Marked KR as complete: {kr_name}")
+
+                # Optionally update the original message
+                if channel_id and message_ts:
+                    try:
+                        bot.update_message(channel_id, message_ts, f"✅ Marked as complete: {kr_name}")
+                    except Exception:
+                        pass
+            else:
+                bot.send_dm(user_id, f"❌ Failed to complete KR: {kr_name}")
+        except Exception as e:
+            print(f"❌ Error marking KR complete: {e}")
+            bot.send_dm(user_id, f"❌ Error completing KR: {kr_name}")
+
+        return {"response_action": "clear"}
+    except Exception as e:
+        print(f"❌ Error in handle_kr_mark_complete: {e}")
         return {"response_action": "clear"}
 
 def handle_24hr_resolution_submission(bot, payload):
