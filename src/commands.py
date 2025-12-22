@@ -274,6 +274,12 @@ def _handle_krlist_command(bot, user_id, text, channel_id):
                                     "style": "primary",
                                     "action_id": "kr_mark_complete",
                                     "value": value_payload,
+                                },
+                                {
+                                    "type": "button",
+                                    "text": {"type": "plain_text", "text": "View Details"},
+                                    "action_id": "view_details",
+                                    "value": f"view_details_{user_id}_{kr_display.replace(' ', '_')}"
                                 }
                             ],
                         }
