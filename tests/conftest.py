@@ -23,6 +23,8 @@ def mock_coda_service():
     coda.add_blocker = Mock(return_value=True)
     coda.search_kr_table = Mock(return_value=[{'name': 'Test KR', 'owner': 'Test User'}])
     coda.get_user_blockers_by_sprint = Mock(return_value=[])
+    coda.save_health_check = Mock(return_value=True)
+    coda.save_health_check_sharing = Mock(return_value=True)
     return coda
 
 @pytest.fixture
