@@ -863,12 +863,25 @@ def handle_blocker_details_submission(bot, payload):
         user_name = bot.get_user_name(user_id)
         values = payload['view']['state']['values']
         
+        def _get_text_value(block_id: str, action_id: str) -> str:
+            block = values.get(block_id, {})
+            action = block.get(action_id, {}) if isinstance(block, dict) else {}
+            raw_value = action.get('value')
+            return raw_value.strip() if isinstance(raw_value, str) else ""
+        
+        def _get_selected_option(block_id: str, action_id: str, default: str = "medium") -> str:
+            block = values.get(block_id, {})
+            action = block.get(action_id, {}) if isinstance(block, dict) else {}
+            selected = action.get('selected_option', {}) if isinstance(action, dict) else {}
+            value = selected.get('value')
+            return value if isinstance(value, str) else default
+        
         # Extract form data
-        sprint_number = values.get('sprint_number', {}).get('sprint_number_input', {}).get('value', '').strip()
-        blocker_description = values.get('blocker_description', {}).get('blocker_description_input', {}).get('value', '').strip()
-        kr_name = values.get('kr_name', {}).get('kr_name_input', {}).get('value', '').strip()
-        urgency = values.get('urgency', {}).get('urgency_input', {}).get('selected_option', {}).get('value', 'medium')
-        notes = values.get('notes', {}).get('notes_input', {}).get('value', '').strip()
+        sprint_number = _get_text_value('sprint_number', 'sprint_number_input')
+        blocker_description = _get_text_value('blocker_description', 'blocker_description_input')
+        kr_name = _get_text_value('kr_name', 'kr_name_input')
+        urgency = _get_selected_option('urgency', 'urgency_input', 'medium')
+        notes = _get_text_value('notes', 'notes_input')
         
         print(f"📝 Blocker submission received from {user_name} ({user_id})")
         print(f"   KR: {kr_name}")
@@ -2333,7 +2346,7 @@ def handle_blocker_completion_submission(bot, payload):
                                 resolution_notes=resolution_notes
                             )
                         except Exception as kr_error:
-                            print(f"⚠️ Error updating KR status: {kr_error}")
+                            print(f"⚠️ Error updating KR status: {kr_error} (this is okay - blocker table is primary)")
                     
                     # Send completion notification to leads channel
                     try:
@@ -3703,38 +3716,95 @@ def handle_blocker_continue_submit(bot, payload):
         bot.send_dm(user_id, f"✅ Blocker submitted! Processing in background...")
         
         # Process blocker submission in background to avoid Slack timeout
-        def process_blocker_submission_in_background():
+        # Process Coda operations in background to avoid Slack timeout
+        def process_resolution_in_background():
             try:
-                # Escalate the blocker to the channel
-                bot.escalate_blocker_with_details(
-                    user_id=user_id,
-                    user_name=user_name,
-                    blocker_description=blocker_description,
-                    kr_name=kr_name,
-                    urgency=urgency,
-                    notes=notes,
-                    sprint_number=sprint_number
-                )
-                
-                # Send confirmation to user
-                bot.send_dm(user_id, f"✅ Blocker submitted successfully!\n\n*KR:* {kr_name}\n*Description:* {blocker_description}\n*Urgency:* {urgency.title()}\n*Sprint:* {sprint_number}\n\nYour blocker has been escalated to the team so anyone can help resolve it!")
-                
+                if bot.coda:
+                    print(f"🔍 DEBUG: Background processing - saving 24-hour blocker resolution for KR: {kr_name}")
+                    
+                    # STEP 1: Find the existing blocker and update its Resolution column
+                    print(f"🔍 DEBUG: Step 1 - Finding existing blocker and updating Resolution column")
+                    
+                    try:
+                        # Search for the existing blocker in the blocker table
+                        blocker_matches = bot.coda.search_blocker_table(kr_name)
+                        
+                        if blocker_matches:
+                            # Use the first match found
+                            blocker_row = blocker_matches[0]
+                            blocker_row_id = blocker_row.get('id')
+                            
+                            if blocker_row_id:
+                                print(f"🔍 DEBUG: Found existing blocker row ID: {blocker_row_id}")
+                                # Update the Resolution column for this blocker
+                                success = bot.coda.mark_blocker_complete(
+                                    row_id=blocker_row_id,
+                                    resolution_notes=resolution_notes
+                                )
+                                
+                                if success:
+                                    print(f"✅ 24-hour blocker resolution saved to Resolution column for {user_name}")
+                                    # Send success confirmation
+                                    bot.send_dm(user_id, f"✅ Resolution saved to Coda for {kr_name}!")
+                                else:
+                                    print(f"⚠️ Failed to update Resolution column for {user_name}")
+                                    bot.send_dm(user_id, f"⚠️ Failed to save resolution to Coda for {kr_name}")
+                            else:
+                                print(f"⚠️ No blocker row ID found for KR: {kr_name}")
+                                bot.send_dm(user_id, f"⚠️ Could not find blocker record for {kr_name}")
+                        else:
+                            print(f"⚠️ No existing blocker found for KR: {kr_name}")
+                            print(f"🔍 DEBUG: KR name being searched: '{kr_name}'")
+                            bot.send_dm(user_id, f"⚠️ No existing blocker found for {kr_name}")
+                            
+                    except Exception as blocker_error:
+                        print(f"⚠️ Error finding/updating blocker: {blocker_error}")
+                        bot.send_dm(user_id, f"❌ Error updating blocker: {blocker_error}")
+                    
+                    # STEP 2: Try to update KR status (optional - blocker table is the primary record)
+                    print(f"🔍 DEBUG: Step 2 - Attempting to update KR status")
+                    try:
+                        kr_success = bot.coda.resolve_blocker_from_kr(
+                            kr_name=kr_name,
+                            resolution_notes=resolution_notes
+                        )
+                        if kr_success:
+                            print(f"✅ KR status updated to 'Unblocked' for {kr_name}")
+                            bot.send_dm(user_id, f"✅ KR status also updated to 'Unblocked' for {kr_name}")
+                        else:
+                            print(f"⚠️ Failed to update KR status for {kr_name} (this is okay - blocker table is primary)")
+                    except Exception as kr_error:
+                        print(f"⚠️ Error updating KR status: {kr_error} (this is okay - blocker table is primary)")
+                        
+                else:
+                    print(f"⚠️ Coda service not available - 24-hour blocker resolution not saved")
+                    bot.send_dm(user_id, f"⚠️ Coda service not available - resolution not saved")
+                        
             except Exception as e:
-                print(f"❌ Error processing blocker submission: {e}")
-                bot.send_dm(user_id, "❌ Error processing blocker submission. Please try again.")
+                print(f"❌ Error in background Coda processing: {e}")
+                bot.send_dm(user_id, f"❌ Error processing resolution: {e}")
+            
+            # Also notify the original blocked user if different
+            try:
+                if target_user_id != user_id:
+                    bot.send_dm(target_user_id, f"🎉 Your blocker for {kr_name} has been resolved by @{user_name} with notes: {resolution_notes}")
+            except Exception as notify_error:
+                print(f"⚠️ Error notifying original user: {notify_error}")
         
         # Start background processing
         import threading
-        thread = threading.Thread(target=process_blocker_submission_in_background)
+        thread = threading.Thread(target=process_resolution_in_background)
         thread.daemon = True
         thread.start()
         
-        # Return proper response for Socket Mode
+        # Return immediately to close the modal
         return {"response_action": "clear"}
         
     except Exception as e:
-        print(f"Error handling blocker continue submit: {e}")
-        bot.send_dm(user_id, "❌ Error processing blocker continue. Please try again.")
+        print(f"❌ Error in handle_24hr_resolution_submission: {e}")
+        import traceback
+        traceback.print_exc()
+        bot.send_dm(user_id, "❌ Error processing 24-hour resolution. Please try again.")
         return {"response_action": "clear"}
 
 def handle_kr_mark_complete(bot, payload):
@@ -3804,102 +3874,110 @@ def handle_24hr_resolution_submission(bot, payload):
         resolution_notes = values.get('resolution_notes', {}).get('resolution_notes_input', {}).get('value', '').strip()
         print(f"🔍 DEBUG: Resolution notes: {resolution_notes}")
         
-        # Parse private_metadata: 24hr_resolution_user_id_kr_name
+        # Parse private_metadata: 24hr_resolution_{user_id}_{kr_name}
         private_metadata = payload['view']['private_metadata']
-        parts = private_metadata.split('_')
-        if len(parts) >= 3:
-            action_type = parts[0]  # 24hr_resolution
-            target_user_id = parts[1]
-            kr_name = '_'.join(parts[2:])  # KR name might contain underscores
+        prefix = "24hr_resolution_"
+        if not private_metadata.startswith(prefix):
+            print(f"❌ Invalid private_metadata format: {private_metadata}")
+            bot.send_dm(user_id, "❌ Error processing resolution metadata. Please try again.")
+            return {"response_action": "clear"}
+
+        remainder = private_metadata[len(prefix):]
+        try:
+            target_user_id, kr_name = remainder.split('_', 1)
+        except ValueError:
+            print(f"❌ Invalid private_metadata format (missing KR name): {private_metadata}")
+            bot.send_dm(user_id, "❌ Error processing resolution metadata. Please try again.")
+            return {"response_action": "clear"}
+
+        # Validate resolution notes
+        if not resolution_notes:
+            bot.send_dm(user_id, "❌ Resolution notes are required. Please try again.")
+            return {"response_action": "clear"}
+
+        # Send immediate confirmation and close modal
+        bot.send_dm(user_id, f"✅ 24-hour blocker resolution submitted! Processing in background...")
             
-            # Validate resolution notes
-            if not resolution_notes:
-                bot.send_dm(user_id, "❌ Resolution notes are required. Please try again.")
-                return {"response_action": "clear"}
-            
-            # Send immediate confirmation and close modal
-            bot.send_dm(user_id, f"✅ 24-hour blocker resolution submitted! Processing in background...")
-            
-            # Process Coda operations in background to avoid Slack timeout
-            def process_resolution_in_background():
-                try:
-                    if bot.coda:
-                        print(f"🔍 DEBUG: Background processing - saving 24-hour blocker resolution for KR: {kr_name}")
+        # Process Coda operations in background to avoid Slack timeout
+        def process_resolution_in_background():
+            try:
+                if bot.coda:
+                    print(f"🔍 DEBUG: Background processing - saving 24-hour blocker resolution for KR: {kr_name}")
+                    
+                    # STEP 1: Find the existing blocker and update its Resolution column
+                    print(f"🔍 DEBUG: Step 1 - Finding existing blocker and updating Resolution column")
+                    
+                    try:
+                        # Search for the existing blocker in the blocker table
+                        blocker_matches = bot.coda.search_blocker_table(kr_name)
                         
-                        # STEP 1: Find the existing blocker and update its Resolution column
-                        print(f"🔍 DEBUG: Step 1 - Finding existing blocker and updating Resolution column")
-                        
-                        try:
-                            # Search for the existing blocker in the blocker table
-                            blocker_matches = bot.coda.search_blocker_table(kr_name)
+                        if blocker_matches:
+                            # Use the first match found
+                            blocker_row = blocker_matches[0]
+                            blocker_row_id = blocker_row.get('id')
                             
-                            if blocker_matches:
-                                # Use the first match found
-                                blocker_row = blocker_matches[0]
-                                blocker_row_id = blocker_row.get('id')
+                            if blocker_row_id:
+                                print(f"🔍 DEBUG: Found existing blocker row ID: {blocker_row_id}")
+                                # Update the Resolution column for this blocker
+                                success = bot.coda.mark_blocker_complete(
+                                    row_id=blocker_row_id,
+                                    resolution_notes=resolution_notes
+                                )
                                 
-                                if blocker_row_id:
-                                    print(f"🔍 DEBUG: Found existing blocker row ID: {blocker_row_id}")
-                                    # Update the Resolution column for this blocker
-                                    success = bot.coda.mark_blocker_complete(
-                                        row_id=blocker_row_id,
-                                        resolution_notes=resolution_notes
-                                    )
-                                    
-                                    if success:
-                                        print(f"✅ 24-hour blocker resolution saved to Resolution column for {user_name}")
-                                        # Send success confirmation
-                                        bot.send_dm(user_id, f"✅ Resolution saved to Coda for {kr_name}!")
-                                    else:
-                                        print(f"⚠️ Failed to update Resolution column for {user_name}")
-                                        bot.send_dm(user_id, f"⚠️ Failed to save resolution to Coda for {kr_name}")
+                                if success:
+                                    print(f"✅ 24-hour blocker resolution saved to Resolution column for {user_name}")
+                                    # Send success confirmation
+                                    bot.send_dm(user_id, f"✅ Resolution saved to Coda for {kr_name}!")
                                 else:
-                                    print(f"⚠️ No blocker row ID found for KR: {kr_name}")
-                                    bot.send_dm(user_id, f"⚠️ Could not find blocker record for {kr_name}")
+                                    print(f"⚠️ Failed to update Resolution column for {user_name}")
+                                    bot.send_dm(user_id, f"⚠️ Failed to save resolution to Coda for {kr_name}")
                             else:
-                                print(f"⚠️ No existing blocker found for KR: {kr_name}")
-                                print(f"🔍 DEBUG: KR name being searched: '{kr_name}'")
-                                bot.send_dm(user_id, f"⚠️ No existing blocker found for {kr_name}")
-                                
-                        except Exception as blocker_error:
-                            print(f"⚠️ Error finding/updating blocker: {blocker_error}")
-                            bot.send_dm(user_id, f"❌ Error updating blocker: {blocker_error}")
-                        
-                        # STEP 2: Try to update KR status (optional - blocker table is the primary record)
-                        print(f"🔍 DEBUG: Step 2 - Attempting to update KR status")
-                        try:
-                            kr_success = bot.coda.resolve_blocker_from_kr(
-                                kr_name=kr_name,
-                                resolution_notes=resolution_notes
-                            )
-                            if kr_success:
-                                print(f"✅ KR status updated to 'Unblocked' for {kr_name}")
-                                bot.send_dm(user_id, f"✅ KR status also updated to 'Unblocked' for {kr_name}")
-                            else:
-                                print(f"⚠️ Failed to update KR status for {kr_name} (this is okay - blocker table is primary)")
-                        except Exception as kr_error:
-                            print(f"⚠️ Error updating KR status: {kr_error} (this is okay - blocker table is primary)")
+                                print(f"⚠️ No blocker row ID found for KR: {kr_name}")
+                                bot.send_dm(user_id, f"⚠️ Could not find blocker record for {kr_name}")
+                        else:
+                            print(f"⚠️ No existing blocker found for KR: {kr_name}")
+                            print(f"🔍 DEBUG: KR name being searched: '{kr_name}'")
+                            bot.send_dm(user_id, f"⚠️ No existing blocker found for {kr_name}")
                             
-                    else:
-                        print(f"⚠️ Coda service not available - 24-hour blocker resolution not saved")
-                        bot.send_dm(user_id, f"⚠️ Coda service not available - resolution not saved")
+                    except Exception as blocker_error:
+                        print(f"⚠️ Error finding/updating blocker: {blocker_error}")
+                        bot.send_dm(user_id, f"❌ Error updating blocker: {blocker_error}")
+                    
+                    # STEP 2: Try to update KR status (optional - blocker table is the primary record)
+                    print(f"🔍 DEBUG: Step 2 - Attempting to update KR status")
+                    try:
+                        kr_success = bot.coda.resolve_blocker_from_kr(
+                            kr_name=kr_name,
+                            resolution_notes=resolution_notes
+                        )
+                        if kr_success:
+                            print(f"✅ KR status updated to 'Unblocked' for {kr_name}")
+                            bot.send_dm(user_id, f"✅ KR status also updated to 'Unblocked' for {kr_name}")
+                        else:
+                            print(f"⚠️ Failed to update KR status for {kr_name} (this is okay - blocker table is primary)")
+                    except Exception as kr_error:
+                        print(f"⚠️ Error updating KR status: {kr_error} (this is okay - blocker table is primary)")
                         
-                except Exception as e:
-                    print(f"❌ Error in background Coda processing: {e}")
-                    bot.send_dm(user_id, f"❌ Error processing resolution: {e}")
-                
-                # Also notify the original blocked user if different
-                try:
-                    if target_user_id != user_id:
-                        bot.send_dm(target_user_id, f"🎉 Your blocker for {kr_name} has been resolved by @{user_name} with notes: {resolution_notes}")
-                except Exception as notify_error:
-                    print(f"⚠️ Error notifying original user: {notify_error}")
+                else:
+                    print(f"⚠️ Coda service not available - 24-hour blocker resolution not saved")
+                    bot.send_dm(user_id, f"⚠️ Coda service not available - resolution not saved")
+                        
+            except Exception as e:
+                print(f"❌ Error in background Coda processing: {e}")
+                bot.send_dm(user_id, f"❌ Error processing resolution: {e}")
             
-            # Start background processing
-            import threading
-            thread = threading.Thread(target=process_resolution_in_background)
-            thread.daemon = True
-            thread.start()
+            # Also notify the original blocked user if different
+            try:
+                if target_user_id != user_id:
+                    bot.send_dm(target_user_id, f"🎉 Your blocker for {kr_name} has been resolved by @{user_name} with notes: {resolution_notes}")
+            except Exception as notify_error:
+                print(f"⚠️ Error notifying original user: {notify_error}")
+        
+        # Start background processing
+        import threading
+        thread = threading.Thread(target=process_resolution_in_background)
+        thread.daemon = True
+        thread.start()
         
         # Return immediately to close the modal
         return {"response_action": "clear"}
@@ -3908,8 +3986,5 @@ def handle_24hr_resolution_submission(bot, payload):
         print(f"❌ Error in handle_24hr_resolution_submission: {e}")
         import traceback
         traceback.print_exc()
-        return {"response_action": "clear"}
         bot.send_dm(user_id, "❌ Error processing 24-hour resolution. Please try again.")
-        return {
-            "response_action": "clear"
-        }
+        return {"response_action": "clear"}

@@ -53,6 +53,74 @@ class CodaService:
         print(f"   KR Table ID: {self.kr_table_id}")
         print(f"   Error Table ID: {self.error_table_id}")
         
+    # --------------------------------------------------------------------- #
+    # Dynamic configuration helpers
+    # --------------------------------------------------------------------- #
+
+    @property
+    def health_check_table_id(self):
+        return os.environ.get("Health_Check") or getattr(self, "_health_check_table_id", None)
+
+    @health_check_table_id.setter
+    def health_check_table_id(self, value):
+        self._health_check_table_id = value
+
+    @property
+    def blocker_table_id(self):
+        return os.environ.get("Blocker") or getattr(self, "_blocker_table_id", None)
+
+    @blocker_table_id.setter
+    def blocker_table_id(self, value):
+        self._blocker_table_id = value
+
+    @property
+    def standup_table_id(self):
+        return os.environ.get("Stand_Up") or getattr(self, "_standup_table_id", None)
+
+    @standup_table_id.setter
+    def standup_table_id(self, value):
+        self._standup_table_id = value
+
+    @property
+    def blocker_res_table_id(self):
+        return os.environ.get("Blocker_Resolution") or getattr(self, "_blocker_res_table_id", None)
+
+    @blocker_res_table_id.setter
+    def blocker_res_table_id(self, value):
+        self._blocker_res_table_id = value
+
+    @property
+    def kr_table_id(self):
+        return os.environ.get("KR_Table") or getattr(self, "_kr_table_id", None)
+
+    @kr_table_id.setter
+    def kr_table_id(self, value):
+        self._kr_table_id = value
+
+    @property
+    def after_health_check_table_id(self):
+        return os.environ.get("After_Health_Check") or getattr(self, "_after_health_check_table_id", None)
+
+    @after_health_check_table_id.setter
+    def after_health_check_table_id(self, value):
+        self._after_health_check_table_id = value
+
+    @property
+    def response_table_id(self):
+        return os.environ.get("Response") or getattr(self, "_response_table_id", None)
+
+    @response_table_id.setter
+    def response_table_id(self, value):
+        self._response_table_id = value
+
+    @property
+    def error_table_id(self):
+        return os.environ.get("ERROR_TABLE") or getattr(self, "_error_table_id", None)
+
+    @error_table_id.setter
+    def error_table_id(self, value):
+        self._error_table_id = value
+        
         # Debug: Check if environment variables are loaded
         print("🔍 DEBUG: Environment variable check:")
         print(f"   Health_Check env var: {os.environ.get('Health_Check', 'NOT SET')}")
@@ -74,6 +142,22 @@ class CodaService:
             print(f"❌ Error deleting row {row_id} from {table_id}: {e}")
             return False
     
+    @property
+    def api_token(self):
+        return os.environ.get("CODA_API_TOKEN") or getattr(self, "_api_token", None)
+
+    @api_token.setter
+    def api_token(self, value):
+        self._api_token = value
+
+    @property
+    def doc_id(self):
+        return os.environ.get("CODA_DOC_ID") or getattr(self, "_doc_id", None)
+
+    @doc_id.setter
+    def doc_id(self, value):
+        self._doc_id = value
+
     def _make_request(self, method, endpoint, data=None):
         """Make a request to the Coda API."""
         print(f"🔍 DEBUG: _make_request called:")
