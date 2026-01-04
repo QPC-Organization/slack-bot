@@ -129,6 +129,18 @@ class CodaService:
         print(f"   Blocker env var: {os.environ.get('Blocker', 'NOT SET')}")
         print(f"   After_Health_Check env var: {os.environ.get('After_Health_Check', 'NOT SET')}")
         print(f"   SLACK_ESCALATION_CHANNEL: {os.environ.get('SLACK_ESCALATION_CHANNEL', 'NOT SET')}")
+
+    def _delete_row(self, table_id, row_id):
+        """Delete a single row from a Coda table."""
+        try:
+            if not table_id or not row_id:
+                return False
+            endpoint = f"/docs/{self.doc_id}/tables/{table_id}/rows/{row_id}"
+            result = self._make_request("DELETE", endpoint)
+            return result is not None or True  # Coda may return empty 202
+        except Exception as e:
+            print(f"❌ Error deleting row {row_id} from {table_id}: {e}")
+            return False
     
     @property
     def api_token(self):
@@ -295,6 +307,93 @@ class CodaService:
             print("❌ Could not fetch columns for mapping.")
             return {}
         return {col["name"]: col["id"] for col in result["items"]}
+
+    def mark_kr_complete(self, table_id, row_id):
+        """Mark a KR row as completed in the given table.
+
+        Sets Status to 'Completed' when column exists, and sets a completion timestamp
+        into either 'Completed At' or 'Completion Date' (if available).
+        """
+        try:
+            if not table_id or not row_id:
+                print("❌ mark_kr_complete: missing table_id or row_id")
+                return False
+
+            column_map = self.get_column_id_map(table_id)
+            if not column_map:
+                print("❌ mark_kr_complete: cannot fetch column map")
+                return False
+
+            from datetime import datetime
+            timestamp = datetime.now().isoformat()
+
+            cells = []
+            if "Status" in column_map:
+                cells.append({"column": column_map["Status"], "value": "Completed"})
+
+            # Completion timestamp if any known column exists
+            for cname in ["Completed At", "Completion Date", "Done At", "Resolved Date"]:
+                if cname in column_map:
+                    cells.append({"column": column_map[cname], "value": timestamp})
+                    break
+
+            if not cells:
+                print("⚠️ mark_kr_complete: no updatable columns found; skipping update")
+                return True
+
+            endpoint = f"/docs/{self.doc_id}/tables/{table_id}/rows/{row_id}"
+            data = {"row": {"cells": cells}}
+            result = self._make_request("PUT", endpoint, data)
+            if result:
+                print(f"✅ KR marked complete in table {table_id}, row {row_id}")
+                return True
+            print("❌ mark_kr_complete: update failed")
+            return False
+        except Exception as e:
+            print(f"❌ Error in mark_kr_complete: {e}")
+            return False
+
+    def delete_blockers_for_kr(self, kr_name):
+        """Delete unresolved blocker rows for a given KR from the blocker table."""
+        try:
+            if not self.blocker_table_id:
+                print("❌ Blocker table ID not configured")
+                return False
+
+            col_map = self.get_column_id_map(self.blocker_table_id)
+            if not col_map:
+                print("❌ Could not get column mapping for blocker table")
+                return False
+
+            endpoint = f"/docs/{self.doc_id}/tables/{self.blocker_table_id}/rows"
+            response = self._make_request("GET", endpoint)
+            if not response:
+                return False
+
+            deleted = 0
+            for row in response.get("items", []):
+                values = row.get("values", {})
+                row_kr = values.get(col_map.get("KR Name", ""), "")
+
+                # Consider unresolved if Resolution (or equivalent) is empty
+                resolved = False
+                for cname in ["Resolution", "Resolution Notes", "Resolved Date", "Completion Date"]:
+                    if cname in col_map:
+                        val = values.get(col_map[cname], "")
+                        if val:
+                            resolved = True
+                            break
+
+                if (kr_name and isinstance(row_kr, str) and (kr_name.lower() in row_kr.lower() or row_kr.lower() in kr_name.lower())) and not resolved:
+                    row_id = row.get("id")
+                    if row_id and self._delete_row(self.blocker_table_id, row_id):
+                        deleted += 1
+
+            print(f"✅ Deleted {deleted} unresolved blocker(s) for KR '{kr_name}'")
+            return True
+        except Exception as e:
+            print(f"❌ Error deleting blockers for KR '{kr_name}': {e}")
+            return False
 
     def resolve_blocker(self, user_id, kr_name, blocker_description, resolved_by, resolution_notes=None, slack_client=None, user_name=None):
         """Update the Resolution column for a blocker in the main blocker table, using column ID mapping. Tries both user_id and user_name for matching."""

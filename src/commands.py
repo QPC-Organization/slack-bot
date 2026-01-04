@@ -14,6 +14,8 @@ def _process_command(bot, user_id, command, text="", channel_id=None, trigger_id
         return _handle_help_command(bot, user_id, channel_id)
     elif command == 'kr':
         return _handle_kr_command(bot, user_id, text, channel_id)
+    elif command in ['krlist', 'krs']:
+        return _handle_krlist_command(bot, user_id, text, channel_id)
     elif command == 'checkin':
         return _handle_checkin_command(bot, user_id, channel_id, trigger_id)
     elif command == 'blocked':
@@ -174,6 +176,142 @@ def _handle_kr_command(bot, user_id, text, channel_id):
         return True
     except Exception as e:
         print(f"❌ Error in KR command handler: {e}")
+        return False
+
+def _handle_krlist_command(bot, user_id, text, channel_id):
+    """Handle /krlist command: list KRs with Mark as Complete buttons.
+
+    Usage:
+      /krlist <sprint_number> [optional search terms]
+      /krs <sprint_number> [optional search terms]
+    """
+    try:
+        import threading
+
+        def process_krlist():
+            try:
+                time.sleep(0.6)
+
+                # Parse: first token sprint, rest search term
+                parts = text.split() if text else []
+                if not parts:
+                    bot.send_dm(user_id, "❌ Sprint number required. Example: /krlist 5 engagement")
+                    return
+
+                try:
+                    sprint_number = int(parts[0])
+                except Exception:
+                    bot.send_dm(user_id, "❌ Invalid sprint. Example: /krlist 5 engagement")
+                    return
+
+                search_term = " ".join(parts[1:]) if len(parts) > 1 else ""
+
+                if not bot.coda:
+                    bot.send_dm(user_id, "⚠️ Coda is not configured. Cannot fetch KRs.")
+                    return
+
+                # Fetch KRs
+                results = bot.coda.search_kr_table(search_term or "*", sprint_number=sprint_number)
+                if not results:
+                    bot.send_dm(user_id, f"No KRs found for Sprint {sprint_number} with term '{search_term}'.")
+                    return
+
+                # Build Block Kit list
+                blocks = [
+                    {
+                        "type": "header",
+                        "text": {"type": "plain_text", "text": f"KRs - Sprint {sprint_number}", "emoji": True},
+                    }
+                ]
+
+                shown = 0
+                for item in results:
+                    # Try to determine display name, status from available keys
+                    kr_display = None
+                    status_val = None
+
+                    # Heuristics: Prefer typical IDs or any value containing text
+                    for key in [
+                        "Key Result",
+                        "Name",
+                        "Title",
+                        "c-yQ1M6UqTSj",
+                    ]:
+                        if key in item and str(item[key]).strip():
+                            kr_display = str(item[key]).strip()
+                            break
+
+                    # Status
+                    for key in [
+                        "Status",
+                        "c-cC29Yow8Gr",
+                    ]:
+                        if key in item and str(item[key]).strip():
+                            status_val = str(item[key]).strip()
+                            break
+
+                    kr_display = kr_display or "(Unnamed KR)"
+                    status_val = status_val or "Unknown"
+
+                    blocks.append(
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f"• *{kr_display}*\nStatus: {status_val}",
+                            },
+                        }
+                    )
+                    # Add actions with Mark as Complete
+                    value_payload = f"{item.get('table_id','')}|{item.get('id','')}|{kr_display}"
+                    blocks.append(
+                        {
+                            "type": "actions",
+                            "elements": [
+                                {
+                                    "type": "button",
+                                    "text": {"type": "plain_text", "text": "Mark as Complete"},
+                                    "style": "primary",
+                                    "action_id": "kr_mark_complete",
+                                    "value": value_payload,
+                                },
+                                {
+                                    "type": "button",
+                                    "text": {"type": "plain_text", "text": "View Details"},
+                                    "action_id": "view_details",
+                                    "value": f"view_details_{user_id}_{kr_display.replace(' ', '_')}"
+                                }
+                            ],
+                        }
+                    )
+
+                    shown += 1
+                    if shown >= 10:
+                        break
+
+                if len(results) > shown:
+                    remaining = len(results) - shown
+                    blocks.append(
+                        {
+                            "type": "context",
+                            "elements": [
+                                {"type": "mrkdwn", "text": f"… and {remaining} more results not shown"}
+                            ],
+                        }
+                    )
+
+                bot.send_dm(user_id, "Here are the matching KRs:", blocks=blocks)
+            except Exception as e:
+                print(f"❌ Error building KR list: {e}")
+                bot.send_dm(user_id, "❌ Error fetching KR list. Please try again.")
+
+        thread = threading.Thread(target=process_krlist)
+        thread.daemon = True
+        thread.start()
+        return True
+
+    except Exception as e:
+        print(f"❌ Error in krlist command handler: {e}")
         return False
 
 def _handle_checkin_command(bot, user_id, channel_id, trigger_id=None):
